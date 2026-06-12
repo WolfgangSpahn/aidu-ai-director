@@ -1,0 +1,423 @@
+[
+  {
+    "id": "disengaged_guesser",
+    "belief": {
+      "engagement": 0.15,
+      "confidence": 0.40,
+      "confusion": 0.60,
+      "frustration": 0.30,
+      "curiosity": 0.10,
+      "self_explanation": 0.05,
+      "guessing": 0.80,
+      "help_seeking": 0.10
+    },
+    "knowledge": {
+      "arithmetic": 0.20,
+      "fractions": 0.10,
+      "equations": 0.20,
+      "functions": 0.10,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "passive_complier",
+    "belief": {
+      "engagement": 0.20,
+      "confidence": 0.30,
+      "confusion": 0.50,
+      "frustration": 0.20,
+      "curiosity": 0.10,
+      "self_explanation": 0.05,
+      "guessing": 0.20,
+      "help_seeking": 0.05
+    },
+    "knowledge": {
+      "arithmetic": 0.30,
+      "fractions": 0.20,
+      "equations": 0.20,
+      "functions": 0.10,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "learned_helplessness",
+    "belief": {
+      "engagement": 0.20,
+      "confidence": 0.05,
+      "confusion": 0.80,
+      "frustration": 0.80,
+      "curiosity": 0.10,
+      "self_explanation": 0.10,
+      "guessing": 0.10,
+      "help_seeking": 0.95
+    },
+    "knowledge": {
+      "arithmetic": 0.30,
+      "fractions": 0.20,
+      "equations": 0.20,
+      "functions": 0.10,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "strategic_minimalist",
+    "belief": {
+      "engagement": 0.10,
+      "confidence": 0.50,
+      "confusion": 0.20,
+      "frustration": 0.10,
+      "curiosity": 0.00,
+      "self_explanation": 0.00,
+      "guessing": 0.30,
+      "help_seeking": 0.00
+    },
+    "knowledge": {
+      "arithmetic": 0.60,
+      "fractions": 0.50,
+      "equations": 0.40,
+      "functions": 0.30,
+      "derivatives": 0.10,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "bored_student",
+    "belief": {
+      "engagement": 0.10,
+      "confidence": 0.80,
+      "confusion": 0.10,
+      "frustration": 0.20,
+      "curiosity": 0.05,
+      "self_explanation": 0.10,
+      "guessing": 0.20,
+      "help_seeking": 0.00
+    },
+    "knowledge": {
+      "arithmetic": 0.80,
+      "fractions": 0.80,
+      "equations": 0.70,
+      "functions": 0.70,
+      "derivatives": 0.40,
+      "integrals": 0.20
+    }
+  },
+  {
+    "id": "confused_beginner",
+    "belief": {
+      "engagement": 0.70,
+      "confidence": 0.20,
+      "confusion": 0.90,
+      "frustration": 0.20,
+      "curiosity": 0.40,
+      "self_explanation": 0.20,
+      "guessing": 0.20,
+      "help_seeking": 0.70
+    },
+    "knowledge": {
+      "arithmetic": 0.30,
+      "fractions": 0.20,
+      "equations": 0.20,
+      "functions": 0.10,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "arithmetic_gap_student",
+    "belief": {
+      "engagement": 0.70,
+      "confidence": 0.40,
+      "confusion": 0.50,
+      "frustration": 0.30,
+      "curiosity": 0.50,
+      "self_explanation": 0.30,
+      "guessing": 0.20,
+      "help_seeking": 0.50
+    },
+    "knowledge": {
+      "arithmetic": 0.10,
+      "fractions": 0.10,
+      "equations": 0.60,
+      "functions": 0.60,
+      "derivatives": 0.50,
+      "integrals": 0.40
+    }
+  },
+  {
+    "id": "anxious_learner",
+    "belief": {
+      "engagement": 0.80,
+      "confidence": 0.10,
+      "confusion": 0.60,
+      "frustration": 0.70,
+      "curiosity": 0.50,
+      "self_explanation": 0.30,
+      "guessing": 0.20,
+      "help_seeking": 0.90
+    },
+    "knowledge": {
+      "arithmetic": 0.50,
+      "fractions": 0.40,
+      "equations": 0.40,
+      "functions": 0.30,
+      "derivatives": 0.10,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "persistent_struggler",
+    "belief": {
+      "engagement": 0.95,
+      "confidence": 0.20,
+      "confusion": 0.80,
+      "frustration": 0.40,
+      "curiosity": 0.70,
+      "self_explanation": 0.60,
+      "guessing": 0.10,
+      "help_seeking": 0.60
+    },
+    "knowledge": {
+      "arithmetic": 0.40,
+      "fractions": 0.30,
+      "equations": 0.40,
+      "functions": 0.30,
+      "derivatives": 0.10,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "overwhelmed_calculus_student",
+    "belief": {
+      "engagement": 0.80,
+      "confidence": 0.20,
+      "confusion": 0.95,
+      "frustration": 0.60,
+      "curiosity": 0.40,
+      "self_explanation": 0.20,
+      "guessing": 0.20,
+      "help_seeking": 0.80
+    },
+    "knowledge": {
+      "arithmetic": 0.20,
+      "fractions": 0.10,
+      "equations": 0.30,
+      "functions": 0.40,
+      "derivatives": 0.70,
+      "integrals": 0.50
+    }
+  },
+  {
+    "id": "curious_novice",
+    "belief": {
+      "engagement": 0.90,
+      "confidence": 0.20,
+      "confusion": 0.60,
+      "frustration": 0.10,
+      "curiosity": 0.95,
+      "self_explanation": 0.50,
+      "guessing": 0.10,
+      "help_seeking": 0.60
+    },
+    "knowledge": {
+      "arithmetic": 0.40,
+      "fractions": 0.30,
+      "equations": 0.20,
+      "functions": 0.10,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "help_seeker",
+    "belief": {
+      "engagement": 0.70,
+      "confidence": 0.30,
+      "confusion": 0.50,
+      "frustration": 0.20,
+      "curiosity": 0.40,
+      "self_explanation": 0.20,
+      "guessing": 0.10,
+      "help_seeking": 0.95
+    },
+    "knowledge": {
+      "arithmetic": 0.50,
+      "fractions": 0.50,
+      "equations": 0.40,
+      "functions": 0.30,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "reflective_thinker",
+    "belief": {
+      "engagement": 0.80,
+      "confidence": 0.60,
+      "confusion": 0.20,
+      "frustration": 0.05,
+      "curiosity": 0.80,
+      "self_explanation": 0.95,
+      "guessing": 0.05,
+      "help_seeking": 0.30
+    },
+    "knowledge": {
+      "arithmetic": 0.80,
+      "fractions": 0.70,
+      "equations": 0.70,
+      "functions": 0.60,
+      "derivatives": 0.30,
+      "integrals": 0.10
+    }
+  },
+  {
+    "id": "motivated_achiever",
+    "belief": {
+      "engagement": 0.95,
+      "confidence": 0.70,
+      "confusion": 0.20,
+      "frustration": 0.05,
+      "curiosity": 0.80,
+      "self_explanation": 0.80,
+      "guessing": 0.05,
+      "help_seeking": 0.30
+    },
+    "knowledge": {
+      "arithmetic": 0.80,
+      "fractions": 0.80,
+      "equations": 0.80,
+      "functions": 0.70,
+      "derivatives": 0.50,
+      "integrals": 0.30
+    }
+  },
+  {
+    "id": "independent_learner",
+    "belief": {
+      "engagement": 0.90,
+      "confidence": 0.80,
+      "confusion": 0.10,
+      "frustration": 0.05,
+      "curiosity": 0.80,
+      "self_explanation": 0.80,
+      "guessing": 0.05,
+      "help_seeking": 0.10
+    },
+    "knowledge": {
+      "arithmetic": 0.80,
+      "fractions": 0.80,
+      "equations": 0.80,
+      "functions": 0.80,
+      "derivatives": 0.60,
+      "integrals": 0.40
+    }
+  },
+  {
+    "id": "overconfident_student",
+    "belief": {
+      "engagement": 0.50,
+      "confidence": 0.95,
+      "confusion": 0.10,
+      "frustration": 0.05,
+      "curiosity": 0.10,
+      "self_explanation": 0.10,
+      "guessing": 0.80,
+      "help_seeking": 0.05
+    },
+    "knowledge": {
+      "arithmetic": 0.30,
+      "fractions": 0.20,
+      "equations": 0.30,
+      "functions": 0.20,
+      "derivatives": 0.00,
+      "integrals": 0.00
+    }
+  },
+  {
+    "id": "advanced_but_careless",
+    "belief": {
+      "engagement": 0.60,
+      "confidence": 0.90,
+      "confusion": 0.10,
+      "frustration": 0.05,
+      "curiosity": 0.20,
+      "self_explanation": 0.20,
+      "guessing": 0.60,
+      "help_seeking": 0.05
+    },
+    "knowledge": {
+      "arithmetic": 0.90,
+      "fractions": 0.90,
+      "equations": 0.90,
+      "functions": 0.90,
+      "derivatives": 0.80,
+      "integrals": 0.70
+    }
+  },
+  {
+    "id": "math_contest_student",
+    "belief": {
+      "engagement": 0.95,
+      "confidence": 0.90,
+      "confusion": 0.10,
+      "frustration": 0.05,
+      "curiosity": 0.95,
+      "self_explanation": 0.90,
+      "guessing": 0.05,
+      "help_seeking": 0.05
+    },
+    "knowledge": {
+      "arithmetic": 0.95,
+      "fractions": 0.95,
+      "equations": 0.95,
+      "functions": 0.95,
+      "derivatives": 0.90,
+      "integrals": 0.80
+    }
+  },
+  {
+    "id": "conceptual_thinker",
+    "belief": {
+      "engagement": 0.85,
+      "confidence": 0.70,
+      "confusion": 0.20,
+      "frustration": 0.05,
+      "curiosity": 0.95,
+      "self_explanation": 0.95,
+      "guessing": 0.05,
+      "help_seeking": 0.20
+    },
+    "knowledge": {
+      "arithmetic": 0.60,
+      "fractions": 0.60,
+      "equations": 0.60,
+      "functions": 0.90,
+      "derivatives": 0.70,
+      "integrals": 0.60
+    }
+  },
+  {
+    "id": "procedure_follower",
+    "belief": {
+      "engagement": 0.70,
+      "confidence": 0.60,
+      "confusion": 0.20,
+      "frustration": 0.10,
+      "curiosity": 0.10,
+      "self_explanation": 0.10,
+      "guessing": 0.05,
+      "help_seeking": 0.20
+    },
+    "knowledge": {
+      "arithmetic": 0.80,
+      "fractions": 0.80,
+      "equations": 0.90,
+      "functions": 0.40,
+      "derivatives": 0.30,
+      "integrals": 0.10
+    }
+  }
+]
+

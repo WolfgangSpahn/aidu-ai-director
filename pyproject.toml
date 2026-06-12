@@ -8,6 +8,7 @@ requires-python = ">=3.11,<3.15"
 dependencies = [
     "aidu-support",
     "aidu-ai-actor",
+    "aidu-ai-llm",
     "pydantic>=2.0",
     "rich>=14.3.2",
 ]
