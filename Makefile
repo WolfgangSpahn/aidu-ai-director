@@ -1,5 +1,7 @@
 PACKAGE=aidu-ai-director
 
+
+
 SMOKE_MODULES=\
 	aidu.ai.director.director
 

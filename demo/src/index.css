@@ -1,0 +1,185 @@
+@import "tailwindcss/theme" source(none);
+@import "tailwindcss/utilities";
+
+@source "../index.html";
+@source "./**/*.{js,jsx,ts,tsx,html}";
+@source "../../../aidu-frontend-dialog/src/**/*.{js,jsx,ts,tsx,html}";
+
+:root {
+  --bg-1: #fcf7ee;
+  --bg-2: #efe6d6;
+  --ink: #1f1f1f;
+  --muted: #5f5a53;
+  --line: #d7c7ae;
+  --card: #fffaf2;
+  --accent: #0f8f7b;
+  --accent-soft: #d9f4ef;
+  --warn: #b7791f;
+  --warn-soft: #fff2dc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: radial-gradient(1200px 800px at 10% 10%, var(--bg-2), var(--bg-1));
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 2rem 1rem;
+}
+
+.frame {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.hero h1 {
+  margin: 0.1rem 0 0;
+  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.subtitle {
+  margin-top: 0.4rem;
+  color: var(--muted);
+}
+
+.card {
+  margin-top: 1.2rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(57, 46, 33, 0.12);
+  overflow: hidden;
+}
+
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.85rem 1rem;
+  background: #fffdf8;
+}
+
+.dialog-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.badge {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid;
+  text-transform: uppercase;
+}
+
+.badge.connected {
+  color: #0b7f6d;
+  background: var(--accent-soft);
+  border-color: #89d9ca;
+}
+
+.badge.connecting,
+.badge.disconnected {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: #ecc991;
+}
+
+.count {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.turn-list {
+  max-height: min(72vh, 680px);
+  overflow: auto;
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.turn {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  background: #fff;
+}
+
+.turn-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.role {
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.actor {
+  font-size: 0.78rem;
+  color: #6a4f2f;
+}
+
+.turn p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.turn-system {
+  background: #fff7eb;
+}
+
+.turn-user {
+  background: #eef9ff;
+}
+
+.turn-assistant,
+.turn-message {
+  background: #f3fff9;
+}
+
+@media (max-width: 680px) {
+  .app-shell {
+    padding: 1rem 0.7rem;
+  }
+
+  .dialog-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

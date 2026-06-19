@@ -1,0 +1,21 @@
+{
+  "name": "aidu-director-dialog-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "aidu-frontend-assets": "file:../../aidu-frontend-assets",
+    "solid-js": "^1.9.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.13",
+    "tailwindcss": "^4.1.13",
+    "vite": "^8.0.16",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}
