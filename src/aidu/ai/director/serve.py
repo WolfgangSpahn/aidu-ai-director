@@ -1,3 +1,18 @@
+"""Frontend bridge for AIDu Director workflows.
+
+The Director coordinates a small cast of actors, usually instances from the
+``aidu-ai-actor`` package. This module provides the user-facing edge of that
+system: it serves the browser frontend, streams dialog turns back to connected
+clients, accepts user input, and exposes a ``/run`` endpoint so the browser user
+can participate in a workflow like any other actor.
+
+In the overall architecture, the Director remains responsible for orchestration
+and routing. ``Server`` is the adapter between that orchestration layer and
+human-facing frontends: browser messages are converted into actor-style
+messages, and actor prompts routed to the user are held until the frontend sends
+the next reply.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,12 +28,15 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from aidu.ai.director.config import DEFAULT_NAMING, WEB_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
 # Models
 # ------------------------------------------------------------------
+
 
 class UserInput(BaseModel):
     role: str = "user"
@@ -37,6 +55,7 @@ class RunRequest(BaseModel):
 # Server
 # ------------------------------------------------------------------
 
+
 class Server:
     def __init__(
         self,
@@ -47,6 +66,7 @@ class Server:
         start_actor: str | None = None,
         max_step: int = 5,
         web_dir: str | Path | None = None,
+        naming: dict[str, str] | None = None,
     ):
         """
         Serves the web frontend and lets a browser user participate as an actor.
@@ -64,11 +84,13 @@ class Server:
         self.director = director
         self.start_actor = start_actor or name
         self.max_step = max_step
+        self.naming = dict(DEFAULT_NAMING if naming is None else naming)
         self.turns: list[dict[str, str]] = []
         self.subscribers: set[queue.Queue[dict[str, str]]] = set()
         self.pending_inputs: queue.Queue[dict[str, str]] = queue.Queue()
         self._pending_input_requests = 0
         self._pending_input_lock = threading.Lock()
+        self._director_event_queue: queue.Queue | None = None
 
         self.web_dir = Path(web_dir) if web_dir is not None else self._find_web_dir()
 
@@ -88,6 +110,7 @@ class Server:
         )
 
         self._register_routes()
+        self._start_director_event_bridge()
 
     # ------------------------------------------------------------------
     # API
@@ -97,6 +120,8 @@ class Server:
     def _find_web_dir() -> Path:
         package_dir = Path(__file__).parent
         candidates = [
+            WEB_CONFIG.web_dir,
+            package_dir / "web" / "dist",
             package_dir / "demo",
             package_dir.parents[3] / "demo" / "dist",
             package_dir.parents[3] / "demo",
@@ -108,13 +133,44 @@ class Server:
 
         return candidates[0]
 
+    def _start_director_event_bridge(self):
+        if self.director is None or not hasattr(self.director, "_add_subscriber"):
+            return
+
+        self._director_event_queue = queue.Queue(maxsize=200)
+        self.director._add_subscriber(self._director_event_queue)
+
+        thread = threading.Thread(
+            target=self._forward_director_events,
+            daemon=True,
+        )
+        thread.start()
+
+    def _forward_director_events(self):
+        if self._director_event_queue is None:
+            return
+
+        while True:
+            event = self._director_event_queue.get()
+            if event.get("event") != "message":
+                continue
+
+            data = event.get("data", {})
+            message = data.get("message", data)
+            turn = self._turn_from_message(
+                message,
+                actor=data.get("actor") or data.get("avatar"),
+            )
+            self._publish_turn(turn)
+
     def _turn_from_message(self, message: dict[str, Any], actor: str | None = None) -> dict[str, str]:
+        actor_name = str(actor or message.get("actor") or message.get("avatar") or self.name)
         turn = {
             "role": str(message.get("role") or "message"),
             "content": str(message.get("content") or ""),
         }
-        turn["actor"] = str(actor or message.get("actor") or message.get("avatar") or self.name)
-        turn["avatar"] = turn["actor"]
+        turn["actor"] = actor_name
+        turn["avatar"] = self.naming.get(actor_name, actor_name)
         return turn
 
     def _publish_turn(self, turn: dict[str, str]):
@@ -174,9 +230,7 @@ class Server:
         if (self.web_dir / "assets").exists():
             self.app.mount(
                 "/assets",
-                StaticFiles(
-                    directory=self.web_dir / "assets"
-                ),
+                StaticFiles(directory=self.web_dir / "assets"),
                 name="assets",
             )
 
@@ -216,6 +270,10 @@ class Server:
                 "forwarding": self.director is not None,
             }
 
+        @self.app.get("/naming")
+        def naming():
+            return self.naming
+
         # --------------------------------------------------
         # Browser sends user input
         # --------------------------------------------------
@@ -232,7 +290,7 @@ class Server:
                     "role": msg.role,
                     "content": msg.content,
                 },
-                actor=self.name,
+                actor=self.start_actor,
             )
             self._publish_turn(turn)
 

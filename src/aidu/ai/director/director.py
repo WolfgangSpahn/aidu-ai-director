@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import queue
 import threading
 import time
@@ -13,17 +12,13 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from rich.console import Console
-from rich.logging import RichHandler
 from rich.rule import Rule
 
 import requests
 
-from aidu.ai.archetype.archetype import archetype_dict
+from aidu.ai.core.context import Message
 
 logger = logging.getLogger(__name__)
-
-from aidu.ai.core.context import Message
 
 
 class RouteBuilder:
@@ -257,10 +252,17 @@ class Director:
     def call(self, actor: str, message: dict) -> dict:
 
         url = self.actors[actor]["url"]
+        payload = {
+            "summary": message.get("summary", ""),
+            "messages": message.get("messages", [message]),
+            "actor": message.get("actor", actor),
+            "role": message.get("role", "user"),
+            "content": message.get("content", ""),
+        }
 
         response = requests.post(
             f"{url}/run",
-            json=message,
+            json=payload,
             timeout=300,
         )
 
@@ -282,7 +284,6 @@ class Director:
 
         step = 0
         while mailbox:
-            
             step += 1
 
             if step > max_step:
@@ -298,7 +299,6 @@ class Director:
 
             actor_name, message = mailbox.popleft()
             logger.info(f"[director] step {step}, mailbox len: {len(mailbox)}: calling {actor_name}")
-
 
             response = self.call(actor=actor_name, message=message)
 
@@ -316,7 +316,6 @@ class Director:
             mailbox.append((next_actor, next_message))
             trace.append((datetime.now().strftime("%Y-%m-%d %H:%M:%S"), next_message))
 
-            
             # for debgugging,
             if console is not None:
                 console.print(Rule(title=f"Step {step}"))
@@ -326,271 +325,3 @@ class Director:
                 input("Press Enter to continue...")
 
         return trace
-
-
-if __name__ == "__main__":
-    from aidu.ai.core.context import Context
-    from aidu.ai.core.belief import StudentBelief, StudentKnowledge
-    from aidu.ai.agents.math_tutor import MathTutor
-    from aidu.ai.agents.math_student import MathStudent
-    from aidu.ai.llm.agent import EndAgent, UserInput, EchoAgent
-    from aidu.ai.agents.symbolic_solver import SymbolicSolver
-    from aidu.ai.llm.clients.openai import OpenAIClient
-    from aidu.ai.actor.actor import Actor
-    from aidu.ai.actor.frontend_actor import FrontendActor
-
-    console = Console()
-
-    from rich.logging import RichHandler
-
-    logging.basicConfig(
-        level="INFO",
-        format="%(funcName)s() -- %(message)s",
-        handlers=[RichHandler(console=console)],
-    )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-
-    # -----------------------------------------------------------------------------------------
-    # Setup
-    # -----------------------------------------------------------------------------------------
-
-    client = OpenAIClient(model="gpt-4o-mini")
-
-    # Initialize belief state, the same for both ftb
-    belief = StudentBelief(
-        engagement=0.15,
-        confidence=0.40,
-        confusion=0.60,
-        frustration=0.30,
-        curiosity=0.10,
-        self_explanation=0.05,
-        guessing=0.80,
-        help_seeking=0.10,
-    )
-
-    knowledge = StudentKnowledge(
-        arithmetic=0.20,
-        fractions=0.10,
-        equations=0.20,
-        functions=0.10,
-        derivatives=0.00,
-        integrals=0.00,
-    )
-
-    # ----------------------------------------------------------------------------------------
-    # Math student actor
-    # ----------------------------------------------------------------------------------------
-    
-    student_context = Context()
-    student_agents = [
-        MathStudent(
-            client,
-            archetype_dict["balanced_student"],
-            archetype_dict["learned_helplessness"],
-            0.1,
-        ),
-        EndAgent(),
-    ]
-
-    for agent in student_agents:
-        student_context.state.data.setdefault(
-            agent.__class__.__name__,
-            getattr(agent, "default_state", {}).copy(),
-        )
-
-    MathStudent.agent = EndAgent
-
-    # console.print("Routes",get_recommendation_data(agents))
-
-    math_student_actor = Actor(
-        name="math_student_actor",
-        agents=student_agents,
-        startup=MathStudent,
-        description="A demo math student actor for testing purposes.",
-    )
-
-    # ----------------------------------------------------------------------------------------
-    # Math student actor
-    # ----------------------------------------------------------------------------------------
-    tutor_context = Context()
-
-    tutor_agents = [
-        MathTutor(
-            client,
-            prompt_args={
-                "tutor_name": "Alice",
-                "focus_area": "general math",
-                "history": "Student just come in.",
-                "student_progress": "We have not started yet.",
-                "level": "beginner",
-                "student_beliefs": belief.to_tutor_text(),
-            },
-        ),
-        SymbolicSolver(),
-        EndAgent(),
-    ]
-
-    for agent in tutor_agents:
-        tutor_context.state.data.setdefault(
-            agent.__class__.__name__,
-            getattr(agent, "default_state", {}).copy(),
-        )
-
-    math_tutor_actor = Actor(
-        name="math_tutor_actor",
-        agents=tutor_agents,
-        startup=MathTutor,
-        # context=tutor_context,
-        description="A demo math tutor actor for testing purposes.",
-    )
-
-    # ----------------------------------------------------------------------------------------
-    # Text User interface actor
-    # ----------------------------------------------------------------------------------------
-
-    tui_user_context = Context()
-
-    class TuiUserInput(UserInput):
-        state_key = "TuiUserInput"  # store user input in context.state.data["TuiUserInput"]
-        target = EndAgent
-        continuations = []
-
-    tui_user_agents = [
-        TuiUserInput(),
-        EndAgent(),
-    ]
-
-
-    tui_user_context.create_agent_states(tui_user_agents)
-
-    tui_user_actor = Actor(
-        name="tui_user_actor",
-        agents=tui_user_agents,
-        startup=TuiUserInput,
-        # context=tui_user_context,
-        description="A demo user interface actor for testing purposes.",
-    )
-
-
-    # ----------------------------------------------------------------------------------------
-    # Graphical User interface actor
-    # ----------------------------------------------------------------------------------------
-
-
-
-    gui_user_actor = FrontendActor(
-        director_url="http://localhost:8100",
-        name="gui_user_actor",
-        description="A demo graphical user interface actor for testing purposes.",
-    )
-
-    # ----------------------------------------------------------------------------------------
-    # Echo actor for testing
-    # ----------------------------------------------------------------------------------------
-
-    echo_context = Context()
-
-    echo_agents = [
-        EchoAgent(),
-        EndAgent(),
-    ]
-
-    echo_context.create_agent_states(echo_agents)
-
-    echo_actor = Actor(
-        name="echo_actor",
-        agents=echo_agents,
-        startup=EchoAgent,
-        # context=echo_context,
-        description="A demo echo actor for testing purposes.",
-    )
-
-    # ----------------------------------------------------------------------------------------
-    # setting up director 1
-    # ----------------------------------------------------------------------------------------
-
-    # director1 = Director()
-
-    # director1.register(
-    #     actor=math_student_actor,
-    #     port=8001,
-    # )
-
-    # director1.register(
-    #     actor=math_tutor_actor,
-    #     port=8002,
-    # )
-
-    # # setting up routes
-
-    # director1.on_input("math_student_actor").send_to("math_tutor_actor")
-
-    # director1.on_input("math_tutor_actor").send_to("math_student_actor")
-
-    sse_enabled = os.getenv("AIDU_DIRECTOR_SSE", "1") == "1"
-    sse_host = os.getenv("AIDU_DIRECTOR_SSE_HOST", "127.0.0.1")
-    sse_port = int(os.getenv("AIDU_DIRECTOR_SSE_PORT", "8100"))
-    sse_path = os.getenv("AIDU_DIRECTOR_SSE_PATH", "/events")
-
-    logger.info(f"SSE enabled: {sse_enabled}, host: {sse_host}, port: {sse_port}, path: {sse_path}")
-
-    # if sse_enabled:
-    #     director1.start_sse_server(host=sse_host, port=sse_port, path=sse_path)
-
-    # # wait until user presses enter to start the director
-    # input("Press Enter to start the director...")
-
-    # try:
-    #     director1.start()
-
-    #     director1.run(
-    #         start_actor="math_student_actor",
-    #         message=Message(
-    #             role="start",
-    #             content="Welcome Bob to our math tutoring session! Let's start to find out where you are in your math journey. Can you tell me a bit about your experience with math and what topics you feel confident in, as well as areas where you might need some help?",
-    #         ),
-    #         # console=console,
-    #     )
-    # finally:
-    #     if sse_enabled:
-    #         director1.stop_sse_server()
-
-    # -----------------------------------------------------------------------------------------
-    # setting up director 2 with echo agent for testing
-    # -----------------------------------------------------------------------------------------
-
-    director2 = Director()
-
-    director2.register(
-        actor=echo_actor,
-        port=8003,
-    )
-
-    director2.register(
-        actor=tui_user_actor,
-        port=8004,
-    )
-
-    director2.on_input("tui_user_actor").send_to("echo_actor")
-
-    director2.on_input("echo_actor").send_to("tui_user_actor")
-
-    if sse_enabled:
-        director2.start_sse_server(host=sse_host, port=sse_port, path=sse_path)
-
-    input("Press Enter to start the echo director...")
-
-    try:
-        director2.start()
-
-        director2.run(
-            start_actor="tui_user_actor",
-            message=Message(
-                role="start",
-                content="Please type something ...",
-            ),
-            # console=console,
-        )
-    finally:
-        if sse_enabled:
-            director2.stop_sse_server()
