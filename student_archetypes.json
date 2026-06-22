@@ -42,6 +42,27 @@
     }
   },
   {
+  "id": "uncertain_help_seeker",
+  "belief": {
+    "engagement": 0.20,
+    "confidence": 0.20,
+    "confusion": 0.70,
+    "frustration": 0.50,
+    "curiosity": 0.10,
+    "self_explanation": 0.05,
+    "guessing": 0.45,
+    "help_seeking": 0.55
+    },
+  "knowledge": {
+    "arithmetic": 0.30,
+    "fractions": 0.20,
+    "equations": 0.20,
+    "functions": 0.10,
+    "derivatives": 0.00,
+    "integrals": 0.00
+    }
+  },
+  {
     "id": "learned_helplessness",
     "belief": {
       "engagement": 0.20,
