@@ -165,8 +165,7 @@ class Director:
             data={**payload, "message": payload},
         )
 
-    @staticmethod
-    def _serialize_message(actor: str, message: Message) -> dict[str, Any]:
+    def _serialize_message(self, actor: str, message: Message) -> dict[str, Any]:
         payload: dict[str, Any]
         if hasattr(message, "model_dump"):
             payload = message.model_dump()
@@ -177,22 +176,36 @@ class Director:
 
         # Keep both actor and avatar for compatibility with existing consumers.
         payload["actor"] = actor
-        payload["avatar"] = actor
+        payload["avatar"] = self.actor_avatar(actor)
         payload.setdefault("role", "assistant")
         payload.setdefault("content", "")
+        source_actor = payload.get("source_actor")
+        if source_actor:
+            payload["source_avatar"] = self.actor_avatar(source_actor)
         return payload
+
+    def get_actor(self, actor: str):
+        return self.actors[actor]["actor"]
+
+    def actor_avatar(self, actor: str) -> str:
+        info = self.actors.get(actor)
+        if info is None:
+            return actor
+        return info["avatar"]
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
 
-    def register(self, actor, port: int):
+    def register(self, actor, port: int | None = None):
 
         self.actors[actor.name] = {
             "actor": actor,
             "port": port,
-            "url": f"http://localhost:{port}",
+            "url": f"http://localhost:{port}" if port is not None else "",
             "thread": None,
+            "service": port is not None,
+            "avatar": getattr(actor, "avatar", actor.name),
         }
 
     # ------------------------------------------------------------------
@@ -210,6 +223,10 @@ class Director:
     def start(self):
 
         for name, info in self.actors.items():
+            if not info["service"]:
+                logger.info(f"registered external actor {name}")
+                continue
+
             logger.info(f"starting {name} on port {info['port']}")
 
             thread = info["actor"].start(
@@ -220,6 +237,9 @@ class Director:
 
         # wait until all actors answer REST requests
         for name, info in self.actors.items():
+            if not info["service"]:
+                continue
+
             self._wait_until_ready(
                 name=name,
                 url=info["url"],
@@ -251,6 +271,9 @@ class Director:
 
     def call(self, actor: str, message: dict) -> dict:
 
+        if actor not in self.actors or not self.actors[actor]["service"]:
+            raise RuntimeError(f"Actor '{actor}' is not a callable service actor")
+
         url = self.actors[actor]["url"]
         payload = {
             "summary": message.get("summary", ""),
@@ -259,6 +282,8 @@ class Director:
             "role": message.get("role", "user"),
             "content": message.get("content", ""),
         }
+        for key, value in message.items():
+            payload.setdefault(key, value)
 
         response = requests.post(
             f"{url}/run",
@@ -300,21 +325,52 @@ class Director:
             actor_name, message = mailbox.popleft()
             logger.info(f"[director] step {step}, mailbox len: {len(mailbox)}: calling {actor_name}")
 
+            if actor_name not in self.actors:
+                logger.debug(f"[director] actor {actor_name} is not registered")
+                break
+
+            if not self.actors[actor_name]["service"]:
+                next_actor = self.routes.get(actor_name)
+                if next_actor is None:
+                    logger.debug(f"[director] external actor {actor_name} has no route")
+                    break
+
+                logger.debug(f"[director] route: {actor_name} -> {next_actor}")
+                mailbox.append((next_actor, message))
+                continue
+
             response = self.call(actor=actor_name, message=message)
 
             next_actor = self.routes.get(actor_name)
-            next_message = Message(role="assistant" if "user" not in actor_name else "user", content=response["content"])
-
-            self._publish_message(next_actor, next_message)
-
             if next_actor is None:
                 logger.debug(f"[director] no route defined for {actor_name}")
                 break
 
+            metadata = {
+                key: value
+                for key, value in message.items()
+                if key not in ("role", "content", "source_actor", "recipient_actor")
+            }
+            next_message = Message(
+                **metadata,
+                role="assistant" if "user" not in actor_name else "user",
+                content=response["content"],
+                source_actor=actor_name,
+                recipient_actor=next_actor,
+            )
+            if response.get("applet") and response.get("applet_command"):
+                next_message["applet"] = response["applet"]
+                next_message["applet_command"] = response["applet_command"]
+
+            self._publish_message(next_actor, next_message)
+
             logger.debug(f"[director] route: {actor_name} -> {next_actor}")
 
-            mailbox.append((next_actor, next_message))
             trace.append((datetime.now().strftime("%Y-%m-%d %H:%M:%S"), next_message))
+            if next_actor not in self.actors:
+                continue
+
+            mailbox.append((next_actor, next_message))
 
             # for debgugging,
             if console is not None:

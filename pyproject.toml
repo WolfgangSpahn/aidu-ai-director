@@ -34,6 +34,7 @@ packages = ["src/aidu"]
 aidu-ai-archetype = { path = "../aidu-ai-archetype", editable = true }
 aidu-ai-actor = { path = "../aidu-ai-actor", editable = true }
 aidu-ai-controller = { path = "../aidu-ai-controller", editable = true }
+aidu-ai-llm = { path = "../aidu-ai-llm", editable = true }
 aidu-support = { path = "../aidu-support", editable = true }
 
 [tool.ruff]

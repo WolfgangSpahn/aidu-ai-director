@@ -5,6 +5,6 @@ WEB_DIST_DIR=\
 
 
 SMOKE_MODULES=\
-	aidu.ai.director.directors.dummy_director
+	aidu.ai.director.directors.math_tutor_director
 
 include ../aidu-dev-tools/python-package.mk
