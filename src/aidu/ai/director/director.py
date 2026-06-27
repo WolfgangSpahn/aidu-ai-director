@@ -224,10 +224,10 @@ class Director:
 
         for name, info in self.actors.items():
             if not info["service"]:
-                logger.info(f"registered external actor {name}")
+                logger.info(f"registered '{name}' as non-service actor")
                 continue
 
-            logger.info(f"starting {name} on port {info['port']}")
+            logger.info(f"starting '{name}' on port {info['port']}'")
 
             thread = info["actor"].start(
                 port=info["port"],
@@ -256,7 +256,17 @@ class Director:
                     timeout=1,
                 )
 
-                logger.debug(f"{name} ready")
+                try:
+                    info = requests.get(f"{url}/info", timeout=1).json()
+                except Exception as exc:
+                    info = {"error": str(exc)}
+
+                logger.debug(
+                    "[director] actor ready name=%s url=%s served_info=%s",
+                    name,
+                    url,
+                    info,
+                )
 
                 return
 
@@ -284,6 +294,20 @@ class Director:
         }
         for key, value in message.items():
             payload.setdefault(key, value)
+
+        session_context = payload.get("session_context") or {}
+        logger.warning(
+            "[director] call actor=%s url=%s startup_actor=%s domain=%s:%s applet=%s:%s messages=%s content_prefix=%r",
+            actor,
+            url,
+            payload.get("actor"),
+            session_context.get("domain"),
+            session_context.get("domain_label"),
+            session_context.get("applet_id"),
+            session_context.get("applet_name"),
+            len(payload.get("messages") or []),
+            str(payload.get("content", ""))[:240],
+        )
 
         response = requests.post(
             f"{url}/run",
@@ -367,7 +391,7 @@ class Director:
             logger.debug(f"[director] route: {actor_name} -> {next_actor}")
 
             trace.append((datetime.now().strftime("%Y-%m-%d %H:%M:%S"), next_message))
-            if next_actor not in self.actors:
+            if next_actor not in self.actors or not self.actors[next_actor]["service"]:
                 continue
 
             mailbox.append((next_actor, next_message))
