@@ -7,14 +7,11 @@ from aidu.ai.core.context import Message
 from aidu.ai.director.director import Director
 from aidu.ai.llm.agent import EchoAgent, EndAgent
 
-GUI_USER_ACTOR = "gui_user_actor"
-GUI_ECHO_ACTOR = "echo_actor"
-
 
 class GuiUserActor(Actor):
     def __init__(self):
         super().__init__(
-            name=GUI_USER_ACTOR,
+            name="gui_user_actor",
             agents=[EndAgent()],
             startup=EndAgent,
             description="The GUI user participating in a director workflow.",
@@ -23,8 +20,9 @@ class GuiUserActor(Actor):
 
 
 def build_gui_dummy_director(echo_port: int = 8003) -> Director:
+    gui_user_actor = GuiUserActor()
     echo_actor = Actor(
-        name=GUI_ECHO_ACTOR,
+        name="echo_actor",
         agents=[EchoAgent()],
         startup=EchoAgent,
         description="A GUI demo echo actor for testing purposes.",
@@ -32,10 +30,10 @@ def build_gui_dummy_director(echo_port: int = 8003) -> Director:
     )
 
     director = Director()
-    director.register(actor=GuiUserActor())
+    director.register(actor=gui_user_actor)
     director.register(actor=echo_actor, port=echo_port)
-    director.on_input(GUI_USER_ACTOR).send_to(GUI_ECHO_ACTOR)
-    director.on_input(GUI_ECHO_ACTOR).send_to(GUI_USER_ACTOR)
+    director.on_input(gui_user_actor.name).send_to(echo_actor.name)
+    director.on_input(echo_actor.name).send_to(gui_user_actor.name)
 
     return director
 

@@ -285,28 +285,36 @@ class Director:
             raise RuntimeError(f"Actor '{actor}' is not a callable service actor")
 
         url = self.actors[actor]["url"]
-        payload = {
+        run_info = {
             "summary": message.get("summary", ""),
             "messages": message.get("messages", [message]),
-            "actor": message.get("actor", actor),
-            "role": message.get("role", "user"),
-            "content": message.get("content", ""),
+            "session_id": message.get("session_id"),
+            "session_context": message.get("session_context", {}),
         }
-        for key, value in message.items():
-            payload.setdefault(key, value)
+        current_message = {
+            key: value
+            for key, value in message.items()
+            if key not in run_info
+        }
+        current_message.setdefault("actor", message.get("actor", actor))
+        current_message.setdefault("role", message.get("role", "user"))
+        current_message.setdefault("content", message.get("content", ""))
+        payload = {
+            "message": current_message,
+            "info": run_info,
+        }
 
-        session_context = payload.get("session_context") or {}
         logger.warning(
             "[director] call actor=%s url=%s startup_actor=%s domain=%s:%s applet=%s:%s messages=%s content_prefix=%r",
             actor,
             url,
-            payload.get("actor"),
-            session_context.get("domain"),
-            session_context.get("domain_label"),
-            session_context.get("applet_id"),
-            session_context.get("applet_name"),
-            len(payload.get("messages") or []),
-            str(payload.get("content", ""))[:240],
+            current_message.get("actor"),
+            run_info["session_context"].get("domain"),
+            run_info["session_context"].get("domain_label"),
+            run_info["session_context"].get("applet_id"),
+            run_info["session_context"].get("applet_name"),
+            len(run_info.get("messages") or []),
+            str(current_message.get("content", ""))[:240],
         )
 
         response = requests.post(
