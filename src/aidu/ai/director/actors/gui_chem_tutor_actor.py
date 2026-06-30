@@ -137,7 +137,7 @@ def _applet_prompt_metadata_from_context(session_context: dict[str, Any]) -> dic
     }
 
 
-def _clean_dialog_message(message: dict[str, Any]) -> dict[str, str] | None:
+def _clean_dialog_message(message: dict[str, Any]) -> dict[str, Any] | None:
     role = message.get("role")
     if role not in {"user", "assistant"}:
         return None
@@ -151,11 +151,15 @@ def _clean_dialog_message(message: dict[str, Any]) -> dict[str, str] | None:
     if not content:
         return None
 
-    actor = message.get("actor") or message.get("avatar") or role
-    return {
+    cleaned: dict[str, Any] = {
         "role": role,
-        "content": f"[{actor}] {content}",
+        "content": content,
     }
+    if message.get("kind") == "applet" and isinstance(message.get("applet_input"), dict):
+        cleaned["kind"] = "applet"
+        cleaned["applet_input"] = message["applet_input"]
+
+    return cleaned
 
 
 def _dialog_history(messages: list[dict[str, Any]]) -> str:
@@ -253,7 +257,8 @@ class GuiChemTutorActor(Actor):
 
     def build_context_from_request(self, req: RunRequest) -> Context:
         session_context = req.info.session_context
-        prior_messages = req.info.messages[:-1] if req.info.messages else []
+        forwarded_messages = req.info.messages or []
+        prior_messages = forwarded_messages[:-1] if forwarded_messages else []
         history = _dialog_history(prior_messages)
         logger.warning(
             "GUI tutor build_context tutor_class=%s request_domain=%s:%s request_applet=%s:%s history_turns=%s content_prefix=%r",
@@ -272,13 +277,12 @@ class GuiChemTutorActor(Actor):
         applet_state = _latest_applet_info_store_from_request(req)
         tutor_state = context.state.data.setdefault(GuiChemLlmTutor.__name__, {})
         tutor_state.update(_prompt_args(session_context, applet_state=applet_state, history=history))
-        if prior_messages:
-            context.trace.messages = [{"role": "system", "content": ""}]
-            context.trace.messages.extend(
+        if forwarded_messages:
+            context.trace.messages = [
                 cleaned_message
-                for message in prior_messages[-MAX_HISTORY_TURNS:]
+                for message in forwarded_messages[-MAX_HISTORY_TURNS:]
                 if (cleaned_message := _clean_dialog_message(message))
-            )
+            ]
         logger.warning(
             "GUI tutor context ready state_class=%s domain=%s applet=%s trace_messages=%s state_keys=%s",
             GuiChemLlmTutor.__name__,
