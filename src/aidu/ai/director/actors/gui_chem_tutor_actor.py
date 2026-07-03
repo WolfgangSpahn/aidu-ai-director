@@ -16,6 +16,7 @@ arrives here, the actor decides which internal agent should handle it.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from aidu.ai.actor.actor import Actor, RunRequest
@@ -45,6 +46,8 @@ CHEM_APPLET_INFO_TEXT_KEYS = (
     "atomicNumber",
     "valenceElectrons",
 )
+
+DEBUG_TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 
 
 class GuiChemLlmTutor(ChemLlmTutor):
@@ -110,8 +113,14 @@ def _student_belief() -> StudentBelief:
     return belief
 
 
+def _debug_enabled() -> bool:
+    return os.getenv("AIDU_DEBUG", "").strip().lower() in DEBUG_TRUE_VALUES
+
+
 def _domain_from_context(session_context: dict[str, Any]) -> dict[str, Any]:
     return {
+        "subject": session_context.get("subject"),
+        "subject_label": session_context.get("subject_label"),
         "id": session_context.get("domain"),
         "label": session_context.get("domain_label"),
         "description": session_context.get("domain_description", ""),
@@ -210,12 +219,12 @@ def _prompt_args(
 def _latest_applet_info_store_from_request(req: RunRequest) -> dict[str, Any]:
     """Return the latest structured applet payload from the GUI.
 
-    The GUI sends live applet changes as ``RunRequest.message["applet_input"]``.
+    The GUI sends live applet changes as ``RunRequest.info.applet_input``.
     The actor already turns that payload into an ``AppletArtifact`` for routing;
     this helper keeps the same structured payload available so the LLM tutor can
     see the latest applet values when it writes its next response.
     """
-    applet_input = req.message.get("applet_input")
+    applet_input = req.info.applet_input
     if isinstance(applet_input, dict):
         applet_info = AppletInfo.from_payload(applet_input)
         logger.warning(
@@ -234,7 +243,7 @@ class GuiChemTutorActor(Actor):
     def __init__(self, client=None, session_context: dict[str, Any] | None = None):
         client = client or OpenAIClient(model="gpt-5-mini")
         agents = [
-            BeginAgent(target=GuiInputRouter, interactive=True),
+            BeginAgent(target=GuiInputRouter, interactive=_debug_enabled()),
             GuiInputRouter(),
             AppletRuleResponder(),
             GuiChemLlmTutor(client, prompt_args=_prompt_args(session_context)),
@@ -268,7 +277,7 @@ class GuiChemTutorActor(Actor):
             session_context.get("applet_id"),
             session_context.get("applet_name"),
             len(prior_messages),
-            str(req.message.get("content") or "")[:240],
+            str(req.message.content or "")[:240],
         )
         context = Context()
         context.state.data["StudentBelief"] = _student_belief()

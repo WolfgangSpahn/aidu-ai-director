@@ -12,6 +12,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from aidu.ai.core.session import RoutedMessage, SessionInfo
 from rich.rule import Rule
 
 import requests
@@ -279,26 +280,23 @@ class Director:
     # REST call
     # ------------------------------------------------------------------
 
-    def call(self, actor: str, message: dict) -> dict:
+    def call(self, actor: str, message: Message | dict[str, Any], info: SessionInfo | None = None) -> dict:
 
         if actor not in self.actors or not self.actors[actor]["service"]:
             raise RuntimeError(f"Actor '{actor}' is not a callable service actor")
 
+        message = message if isinstance(message, Message) else Message.model_validate(message)
+
         url = self.actors[actor]["url"]
-        run_info = {
-            "summary": message.get("summary", ""),
-            "messages": message.get("messages", [message]),
-            "session_id": message.get("session_id"),
-            "session_context": message.get("session_context", {}),
-        }
-        current_message = {
-            key: value
-            for key, value in message.items()
-            if key not in run_info
-        }
-        current_message.setdefault("actor", message.get("actor", actor))
-        current_message.setdefault("role", message.get("role", "user"))
-        current_message.setdefault("content", message.get("content", ""))
+        run_info = (
+            info.model_dump(exclude_none=True)
+            if info is not None
+            else {"summary": "", "messages": [], "session_id": None, "session_context": {}}
+        )
+        current_message = message.model_dump(exclude_none=True)
+        current_message.setdefault("actor", message.actor or actor)
+        current_message.setdefault("role", message.role or "user")
+        current_message.setdefault("content", message.content or "")
         payload = {
             "message": current_message,
             "info": run_info,
@@ -331,7 +329,17 @@ class Director:
     # Workflow
     # ------------------------------------------------------------------
 
-    def run(self, start_actor: str, message: Message, max_step: int = 5, console=None, interactive: bool = False):
+    def run(
+        self,
+        start_actor: str,
+        message: Message | dict[str, Any],
+        info: SessionInfo | None = None,
+        max_step: int = 5,
+        console=None,
+        interactive: bool = False,
+    ):
+
+        message = message if isinstance(message, Message) else Message.model_validate(message)
 
         trace = [(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), message)]
         self._publish_message(start_actor, message)
@@ -371,28 +379,32 @@ class Director:
                 mailbox.append((next_actor, message))
                 continue
 
-            response = self.call(actor=actor_name, message=message)
+            service_message = (
+                message
+                if isinstance(message, Message)
+                else Message(
+                    role=message.role,
+                    content=message.content,
+                    actor=message.source_actor,
+                )
+            )
+            response = self.call(actor=actor_name, message=service_message, info=info)
 
             next_actor = self.routes.get(actor_name)
             if next_actor is None:
                 logger.debug(f"[director] no route defined for {actor_name}")
                 break
 
-            metadata = {
-                key: value
-                for key, value in message.items()
-                if key not in ("role", "content", "source_actor", "recipient_actor")
-            }
-            next_message = Message(
-                **metadata,
+            next_message = RoutedMessage(
                 role="assistant" if "user" not in actor_name else "user",
                 content=response["content"],
                 source_actor=actor_name,
                 recipient_actor=next_actor,
+                session_id=info.session_id if info else None,
             )
             if response.get("applet") and response.get("applet_command"):
-                next_message["applet"] = response["applet"]
-                next_message["applet_command"] = response["applet_command"]
+                next_message.applet = response["applet"]
+                next_message.applet_command = response["applet_command"]
 
             self._publish_message(next_actor, next_message)
 
