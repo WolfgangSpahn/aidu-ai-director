@@ -85,8 +85,8 @@ def test_gui_chem_tutor_prompt_contains_active_atomic_structure_context():
                 "domain_description": "Students learn how atoms are built from subatomic particles.",
                 "domain_targets": [
                     {
-                        "id": "atomic-particles",
-                        "text": "describe protons, neutrons, and electrons.",
+                        "id": "neutron-identity",
+                        "text": "identify the neutron count.",
                     },
                 ],
                 "applet_id": "applet-build-an-atom",

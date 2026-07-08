@@ -405,6 +405,10 @@ class Director:
             if response.get("applet") and response.get("applet_command"):
                 next_message.applet = response["applet"]
                 next_message.applet_command = response["applet_command"]
+            if response.get("backend_belief_state"):
+                next_message.backend_belief_state = response["backend_belief_state"]
+            if response.get("backend_progress_state"):
+                next_message.backend_progress_state = response["backend_progress_state"]
 
             self._publish_message(next_actor, next_message)
 
