@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Dr. Wolfgang Spahn, PHBern
+#
+# MIT License — see LICENSE file for details.
+# If you use this software in academic work, citation of the original author is requested.
 """Frontend bridge for AIDu Director workflows.
 
 The Director coordinates a small cast of actors, usually instances from the

@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Dr. Wolfgang Spahn, PHBern
+#
+# MIT License — see LICENSE file for details.
+# If you use this software in academic work, citation of the original author is requested.
 # src/aidu/ai/director/director.py
 
 from __future__ import annotations
@@ -405,6 +409,13 @@ class Director:
             if response.get("applet") and response.get("applet_command"):
                 next_message.applet = response["applet"]
                 next_message.applet_command = response["applet_command"]
+            if response.get("activity_event"):
+                next_message.activity_event = response["activity_event"]
+                logger.info(
+                    "[director] forwarding activity_event session=%s event=%s",
+                    info.session_id if info else None,
+                    response["activity_event"],
+                )
             if response.get("backend_belief_state"):
                 next_message.backend_belief_state = response["backend_belief_state"]
             if response.get("backend_progress_state"):

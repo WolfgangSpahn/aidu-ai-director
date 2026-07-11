@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Dr. Wolfgang Spahn, PHBern
+#
+# MIT License — see LICENSE file for details.
+# If you use this software in academic work, citation of the original author is requested.
 """GUI user actor for frontend-driven Director workflows.
 
 The GUI user actor represents the frontend boundary inside a Director graph.
