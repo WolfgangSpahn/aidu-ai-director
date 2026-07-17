@@ -541,6 +541,7 @@ class GuiChemTutorActor(Actor):
             str(req.message.content or "")[:240],
         )
         context = Context()
+        self.configure_context_from_request(context, req)
         context.state.data["StudentBelief"] = _student_belief()
         context.state.data["StudentProgress"] = (
             _latest_backend_progress_state(forwarded_messages)
