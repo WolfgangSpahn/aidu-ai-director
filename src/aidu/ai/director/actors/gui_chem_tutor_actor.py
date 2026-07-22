@@ -65,6 +65,12 @@ PROGRESS_META_KEYS = {
     "progress_update_count",
     "progress_update_indicator",
 }
+INITIAL_NEGATIVE_EVIDENCE = 4.0
+EVIDENCE_WEIGHTS = {
+    "w": 1.0,
+    "m": 2.0,
+    "s": 4.0,
+}
 
 
 Strength = str
@@ -117,13 +123,14 @@ class GuiInputRouter(WorkflowAgent):
         if not is_applet_input and isinstance(artifact.content, str):
             side = get_turn_side_tasks(context)
             assessor_context = copy.deepcopy(context)
+            assessor_context.control.data.pop("stream_callback", None)
             current_turn = _current_turn_text(artifact)
             prompt_params = _chem_assessor_prompt_args(
                 context=assessor_context,
                 session_context=self.session_context,
                 current_turn=current_turn,
             )
-            logger.warning(
+            logger.debug(
                 "ChemAssessor.spawn indicators=%s current_turn=%r",
                 prompt_params.get("valid_indicators"),
                 current_turn[:160],
@@ -133,6 +140,7 @@ class GuiInputRouter(WorkflowAgent):
                 lambda: run_chem_assessor_sync(
                     client=self.client,
                     prompt_params=prompt_params,
+                    context=assessor_context,
                 ),
                 on_result=lambda assessment, join_context: apply_chem_assessment(
                     assessment=assessment,
@@ -150,7 +158,7 @@ class GuiInputRouter(WorkflowAgent):
                 else "Typed dialog input should be handled by the LLM tutor."
             ),
         )
-        logger.warning(
+        logger.debug(
             "GuiInputRouter.route mode=%s target=%s artifact_type=%s content=%r",
             mode,
             target.__name__,
@@ -178,7 +186,11 @@ def _student_progress_from_context(session_context: dict[str, Any]) -> dict[str,
             target_id = _canonical_progress_target_id(str(target.get("id") or "").strip())
             if not target_id or target_id in PROGRESS_META_KEYS:
                 continue
-            progress_by_target[target_id] = 0.0
+            progress_by_target[target_id] = {
+                "mastery": 0.0,
+                "positive_evidence": 0.0,
+                "negative_evidence": INITIAL_NEGATIVE_EVIDENCE,
+            }
 
     return progress_by_target
 
@@ -204,33 +216,30 @@ def _student_goal_from_context(session_context: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _normalize_student_progress(progress: Any) -> dict[str, float]:
-    """Normalize progress payloads to ``target_id -> probability``."""
+def _normalize_student_progress(progress: Any) -> dict[str, dict[str, float]]:
+    """Validate the evidence-backed target progress emitted by the actor."""
     if not isinstance(progress, dict):
         return {}
 
-    targets = progress.get("targets")
-    if isinstance(targets, list):
-        normalized: dict[str, float] = {}
-        for target in targets:
-            if not isinstance(target, dict):
-                continue
-            target_id = str(target.get("id") or "").strip()
-            if not target_id or target_id in PROGRESS_META_KEYS:
-                continue
-            mastery = target.get("mastery")
-            normalized[_canonical_progress_target_id(target_id)] = float(mastery) if isinstance(mastery, (int, float)) else 0.0
-        return normalized
-
-    normalized = {
-        _canonical_progress_target_id(str(key)): float(value)
-        for key, value in progress.items()
-        if str(key) not in PROGRESS_META_KEYS and isinstance(value, (int, float))
-    }
+    normalized: dict[str, dict[str, float]] = {}
+    for key, value in progress.items():
+        target_id = _canonical_progress_target_id(str(key))
+        if target_id in PROGRESS_META_KEYS or not isinstance(value, dict):
+            continue
+        mastery = value.get("mastery")
+        positive = value.get("positive_evidence")
+        negative = value.get("negative_evidence")
+        if not all(isinstance(item, (int, float)) for item in (mastery, positive, negative)):
+            continue
+        normalized[target_id] = {
+            "mastery": max(0.0, min(1.0, float(mastery))),
+            "positive_evidence": max(0.0, float(positive)),
+            "negative_evidence": max(0.0, float(negative)),
+        }
     return normalized
 
 
-def _latest_backend_progress_state(messages: list[dict[str, Any]]) -> dict[str, float]:
+def _latest_backend_progress_state(messages: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     for message in reversed(messages):
         if not isinstance(message, dict):
             continue
@@ -252,15 +261,21 @@ def _current_turn_text(artifact: Artifact) -> str:
     return f"Student: {artifact.content}"
 
 
-def _last_turn_text_from_context(context: Context) -> str:
-    cleaned = [
-        cleaned_message
-        for message in context.trace.messages[-MAX_HISTORY_TURNS:]
-        if isinstance(message, dict) and (cleaned_message := _clean_dialog_message(message))
-    ]
-    if not cleaned:
-        return "No previous turn."
-    return "\n".join(f"{message['role'].title()}: {message['content']}" for message in cleaned[-2:])
+def _last_tutor_turn_from_context(context: Context) -> str:
+    """Return the tutor utterance that the current student answer responds to.
+
+    Virtual students commonly send an applet event between the tutor's prompt
+    and their spoken answer. Selecting the last two raw trace messages therefore
+    loses the tutor prompt and leaves terse answers such as ``6`` impossible to
+    assess. Walk backward to the latest real assistant dialog instead.
+    """
+    for message in reversed(context.trace.messages[-MAX_HISTORY_TURNS:]):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        cleaned = _clean_dialog_message(message)
+        if cleaned and str(cleaned.get("content") or "").strip():
+            return f"Tutor: {cleaned['content']}"
+    return "No previous tutor turn."
 
 
 def _current_applet_state_from_context(context: Context) -> Any:
@@ -278,20 +293,25 @@ def _chem_assessor_prompt_args(
 ) -> dict[str, Any]:
     return {
         "valid_indicators": _valid_indicators_from_context(context, session_context),
-        "last_turn": _last_turn_text_from_context(context),
+        "last_turn": _last_tutor_turn_from_context(context),
         "current_turn": current_turn,
         "current_applet_state": _current_applet_state_from_context(context),
     }
 
 
-def run_chem_assessor_sync(*, client, prompt_params: dict[str, Any]) -> dict[str, Any]:
-    logger.warning("ChemAssessor.start")
+def run_chem_assessor_sync(
+    *,
+    client,
+    prompt_params: dict[str, Any],
+    context: Context,
+) -> dict[str, Any]:
+    logger.debug("ChemAssessor.start")
     ChemAssessor.target = EndAgent
     assessor = ChemAssessor(client=client or OpenAIClient(model="gpt-5-mini"))
     result, _ = run_agent_text_turn(
         starting_agent=assessor,
         user_text="Assess the current chemistry learning evidence.",
-        context=Context(),
+        context=context,
         agents=[assessor, EndAgent()],
         prompt_params=prompt_params,
         ask_config=AskConfig(
@@ -303,33 +323,22 @@ def run_chem_assessor_sync(*, client, prompt_params: dict[str, Any]) -> dict[str
     content = result.content()
     try:
         assessment = json.loads(content)
-        logger.warning("ChemAssessor.done assessment=%s", assessment)
+        logger.debug("ChemAssessor.done assessment=%s", assessment)
         return assessment
     except json.JSONDecodeError:
         logger.warning("ChemAssessor returned non-JSON content: %r", content)
         return {"e": [], "review": True, "raw": content}
 
 
-def _progress_delta(polarity: Polarity, strength: Strength) -> float:
-    if polarity == "?":
-        return 0.0
-    magnitude = {
-        "w": 0.04,
-        "m": 0.08,
-        "s": 0.12,
-    }.get(strength, 0.04)
-    return magnitude if polarity == "+" else -magnitude
-
-
 def apply_chem_assessment(*, assessment: dict[str, Any], context: Context) -> None:
     progress = context.state.data.get("StudentProgress")
     if not isinstance(progress, dict):
-        logger.warning("ChemAssessor.apply skipped reason=no_student_progress")
+        logger.debug("ChemAssessor.apply skipped reason=no_student_progress")
         return
 
     evidence = assessment.get("e")
     if not isinstance(evidence, list):
-        logger.warning("ChemAssessor.apply skipped reason=no_evidence assessment=%s", assessment)
+        logger.debug("ChemAssessor.apply skipped reason=no_evidence assessment=%s", assessment)
         return
 
     applied: list[dict[str, Any]] = []
@@ -341,23 +350,41 @@ def apply_chem_assessment(*, assessment: dict[str, Any], context: Context) -> No
         if indicator not in progress:
             skipped.append({"indicator": indicator, "reason": "missing_progress_key"})
             continue
-        current = progress.get(indicator, 0.0)
-        if not isinstance(current, (int, float)):
-            skipped.append({"indicator": indicator, "reason": "non_numeric_progress"})
+        target_state = progress.get(indicator)
+        if not isinstance(target_state, dict):
+            skipped.append({"indicator": indicator, "reason": "invalid_evidence_state"})
             continue
-        delta = _progress_delta(str(item.get("p") or "?"), str(item.get("s") or "w"))
-        if delta == 0.0:
+        polarity = str(item.get("p") or "?")
+        if polarity not in {"+", "-"}:
             skipped.append({"indicator": indicator, "reason": "zero_delta"})
             continue
-        updated = max(0.0, min(1.0, float(current) + delta))
-        progress[indicator] = updated
-        applied.append({"indicator": indicator, "prior": float(current), "delta": delta, "posterior": updated})
+        weight = EVIDENCE_WEIGHTS.get(str(item.get("s") or "w"), 1.0)
+        positive = max(0.0, float(target_state.get("positive_evidence", 0.0) or 0.0))
+        negative = max(0.0, float(target_state.get("negative_evidence", INITIAL_NEGATIVE_EVIDENCE) or 0.0))
+        prior = positive / (positive + negative) if positive + negative else 0.0
+        if polarity == "+":
+            positive += weight
+        else:
+            negative += weight
+        posterior = positive / (positive + negative) if positive + negative else 0.0
+        target_state.update({
+            "mastery": posterior,
+            "positive_evidence": positive,
+            "negative_evidence": negative,
+        })
+        applied.append({
+            "indicator": indicator,
+            "prior": prior,
+            "weight": weight,
+            "polarity": polarity,
+            "posterior": posterior,
+        })
 
     if applied:
         context.control.data["chem_assessor_evidence"] = assessment
-        logger.warning("ChemAssessor progress applied: %s", applied)
+        logger.debug("ChemAssessor progress applied: %s", applied)
     else:
-        logger.warning("ChemAssessor.apply no_progress_change skipped=%s assessment=%s", skipped, assessment)
+        logger.debug("ChemAssessor.apply no_progress_change skipped=%s assessment=%s", skipped, assessment)
 
 
 def _student_progress_tutor_text(student_progress: dict[str, Any]) -> str:
@@ -486,7 +513,7 @@ def _latest_applet_info_store_from_request(req: RunRequest) -> dict[str, Any]:
     applet_input = req.info.applet_input
     if isinstance(applet_input, dict):
         applet_info = AppletInfo.from_payload(applet_input)
-        logger.warning(
+        logger.debug(
             "GUI tutor applet state parsed keys=%s applet=%s",
             sorted(applet_info.to_state().keys()),
             applet_info.applet,
@@ -530,7 +557,7 @@ class GuiChemTutorActor(Actor):
         forwarded_messages = req.info.messages or []
         prior_messages = forwarded_messages[:-1] if forwarded_messages else []
         history = _dialog_history(prior_messages)
-        logger.warning(
+        logger.debug(
             "GUI tutor build_context tutor_class=%s request_domain=%s:%s request_applet=%s:%s history_turns=%s content_prefix=%r",
             GuiChemLlmTutor.__name__,
             session_context.get("domain"),
@@ -566,7 +593,7 @@ class GuiChemTutorActor(Actor):
                 for message in forwarded_messages[-MAX_HISTORY_TURNS:]
                 if (cleaned_message := _clean_dialog_message(message))
             ]
-        logger.warning(
+        logger.debug(
             "GUI tutor context ready state_class=%s domain=%s applet=%s trace_messages=%s state_keys=%s",
             GuiChemLlmTutor.__name__,
             tutor_state.get("domain_id"),

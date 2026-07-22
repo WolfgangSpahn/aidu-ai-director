@@ -15,6 +15,7 @@ from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from uuid import uuid4
 
 from aidu.ai.core.session import RoutedMessage, SessionInfo
 from rich.rule import Rule
@@ -306,7 +307,7 @@ class Director:
             "info": run_info,
         }
 
-        logger.warning(
+        logger.debug(
             "[director] call actor=%s url=%s startup_actor=%s domain=%s:%s applet=%s:%s messages=%s content_prefix=%r",
             actor,
             url,
@@ -320,14 +321,36 @@ class Director:
         )
 
         response = requests.post(
-            f"{url}/run",
+            f"{url}/run/stream",
             json=payload,
             timeout=300,
+            stream=True,
         )
-
         response.raise_for_status()
-
-        return response.json()
+        turn_id = str(uuid4())
+        final_response: dict[str, Any] | None = None
+        for line in response.iter_lines(chunk_size=1, decode_unicode=True):
+            if not line:
+                continue
+            event = json.loads(line)
+            if event.get("type") == "delta":
+                self._publish_event(
+                    event="message_delta",
+                    data={
+                        "session_id": run_info.get("session_id"),
+                        "turn_id": turn_id,
+                        "source_actor": actor,
+                        "recipient_actor": self.routes.get(actor),
+                        "content": event.get("content", ""),
+                    },
+                )
+            elif event.get("type") == "final":
+                final_response = event.get("response") or {}
+            elif event.get("type") == "error":
+                raise RuntimeError(event.get("error") or "Streaming actor request failed")
+        if final_response is None:
+            raise RuntimeError(f"Actor '{actor}' stream ended without a final response")
+        return final_response
 
     # ------------------------------------------------------------------
     # Workflow
@@ -367,7 +390,7 @@ class Director:
                 break
 
             actor_name, message = mailbox.popleft()
-            logger.info(f"[director] step {step}, mailbox len: {len(mailbox)}: calling {actor_name}")
+            logger.debug(f"[director] step {step}, mailbox len: {len(mailbox)}: calling {actor_name}")
 
             if actor_name not in self.actors:
                 logger.debug(f"[director] actor {actor_name} is not registered")

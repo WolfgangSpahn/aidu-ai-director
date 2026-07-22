@@ -7,17 +7,24 @@ class FakeResponse:
     def raise_for_status(self):
         return None
 
-    def json(self):
-        return {"role": "assistant", "content": "ok"}
+    def iter_lines(self, chunk_size=None, decode_unicode=False):
+        assert chunk_size == 1
+        assert decode_unicode is True
+        return iter([
+            '{"type":"delta","content":"o"}',
+            '{"type":"delta","content":"k"}',
+            '{"type":"final","response":{"role":"assistant","content":"ok"}}',
+        ])
 
 
 def test_director_call_sends_nested_message_and_info(monkeypatch):
     captured = {}
 
-    def fake_post(url, json, timeout):
+    def fake_post(url, json, timeout, stream):
         captured["url"] = url
         captured["json"] = json
         captured["timeout"] = timeout
+        captured["stream"] = stream
         return FakeResponse()
 
     monkeypatch.setattr("aidu.ai.director.director.requests.post", fake_post)
@@ -27,6 +34,8 @@ def test_director_call_sends_nested_message_and_info(monkeypatch):
         "service": True,
         "url": "http://actor.test",
     }
+    events = Queue()
+    director._add_subscriber(events)
 
     response = director.call(
         "chem_tutor_actor",
@@ -48,7 +57,14 @@ def test_director_call_sends_nested_message_and_info(monkeypatch):
     )
 
     assert response == {"role": "assistant", "content": "ok"}
-    assert captured["url"] == "http://actor.test/run"
+    first_delta = events.get_nowait()
+    second_delta = events.get_nowait()
+    assert first_delta["event"] == "message_delta"
+    assert first_delta["data"]["session_id"] == "session-1"
+    assert first_delta["data"]["content"] == "o"
+    assert second_delta["data"]["content"] == "k"
+    assert captured["url"] == "http://actor.test/run/stream"
+    assert captured["stream"] is True
     assert captured["json"] == {
         "message": {
             "role": "user",
@@ -106,3 +122,4 @@ def test_director_run_preserves_session_id_without_copying_input_metadata(monkey
     assert next_message.session_id == "session-1"
     assert not hasattr(next_message, "kind")
     assert not hasattr(next_message, "applet_input")
+from queue import Queue
