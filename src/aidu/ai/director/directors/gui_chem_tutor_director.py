@@ -11,7 +11,7 @@ how messages route between them.
 
 from __future__ import annotations
 
-from aidu.ai.director.actors.gui_chem_tutor_actor import GuiChemTutorActor
+from aidu.ai.director.actors.GuiChemTutorActor import GuiChemTutorActor
 from aidu.ai.director.actors.gui_user_actor import GuiUserActor
 from aidu.ai.director.director import Director
 

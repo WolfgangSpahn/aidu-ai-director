@@ -48,7 +48,7 @@ def build_math_tutor_director(
                 "tutor_name": "Alice",
                 "focus_area": "general math",
                 "history": "Student just came in.",
-                "student_progress": "We have not started yet.",
+                "student_knowledge_progress": "We have not started yet.",
                 "level": "beginner",
                 "student_beliefs": belief.to_tutor_text(),
             },

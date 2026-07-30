@@ -293,11 +293,12 @@ class Director:
         message = message if isinstance(message, Message) else Message.model_validate(message)
 
         url = self.actors[actor]["url"]
-        run_info = (
-            info.model_dump(exclude_none=True)
-            if info is not None
-            else {"summary": "", "messages": [], "session_id": None, "session_context": {}}
-        )
+        run_info = info.model_dump(exclude_none=True) if info is not None else {
+            "summary": "",
+            "messages": [],
+            "session_id": None,
+            "session_context": {"on_air": False},
+        }
         current_message = message.model_dump(exclude_none=True)
         current_message.setdefault("actor", message.actor or actor)
         current_message.setdefault("role", message.role or "user")
@@ -441,8 +442,11 @@ class Director:
                 )
             if response.get("backend_belief_state"):
                 next_message.backend_belief_state = response["backend_belief_state"]
-            if response.get("backend_progress_state"):
-                next_message.backend_progress_state = response["backend_progress_state"]
+            if response.get("backend_knowledge_progress_state"):
+                next_message.backend_knowledge_progress_state = response["backend_knowledge_progress_state"]
+            supervision_state = response.get("backend_supervision_state")
+            if supervision_state:
+                next_message.backend_supervision_state = supervision_state
 
             self._publish_message(next_actor, next_message)
 

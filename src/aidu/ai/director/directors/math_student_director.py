@@ -21,11 +21,7 @@ from aidu.ai.llm.clients.openai import OpenAIClient
 logger = logging.getLogger(__name__)
 
 
-def build_math_student_director(
-    client=None,
-    student_port: int = 8001,
-    user_port: int = 8004
-) -> Director:
+def build_math_student_director(client=None, student_port: int = 8001, user_port: int = 8004) -> Director:
     client = client or OpenAIClient(model="gpt-4o-mini")
 
     student_context = Context()

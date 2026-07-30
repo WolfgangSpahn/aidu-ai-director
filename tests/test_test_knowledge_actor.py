@@ -5,17 +5,20 @@ from aidu.ai.director.actors.test_knowledge_actor import TestKnowledgeAnalyzer
 
 def test_test_knowledge_actor_aggregates_scored_questions_by_target():
     context = Context()
-    _, context = TestKnowledgeAnalyzer().run(TextArtifact(
-        producer="test",
-        step=0,
-        content='{"questions": ['
-        '{"id":"q1","correct":true,"targets":["atomic-structure"]},'
-        '{"id":"q2","correct":false,"targets":["atomic-structure"]},'
-        '{"id":"q3","correct":true,"targets":["electron-arrangement"]}'
-        ']}'
-    ), context)
+    _, context = TestKnowledgeAnalyzer().run(
+        TextArtifact(
+            producer="test",
+            step=0,
+            content='{"questions": ['
+            '{"id":"q1","correct":true,"targets":["atomic-structure"]},'
+            '{"id":"q2","correct":false,"targets":["atomic-structure"]},'
+            '{"id":"q3","correct":true,"targets":["electron-arrangement"]}'
+            "]}",
+        ),
+        context,
+    )
 
-    assert context.state.data["StudentProgress"] == {
+    assert context.state.data["StudentKnowledgeProgress"].model_dump() == {
         "atomic-structure": {
             "mastery": 0.5,
             "positive_evidence": 1.0,
@@ -31,26 +34,26 @@ def test_test_knowledge_actor_aggregates_scored_questions_by_target():
 
 def test_test_knowledge_actor_falls_back_to_question_id_without_targets():
     context = Context()
-    _, context = TestKnowledgeAnalyzer().run(TextArtifact(
-        producer="test",
-        step=0,
-        content='{"questions":[{"id":"q1","correct":true}]}',
-    ), context)
+    _, context = TestKnowledgeAnalyzer().run(
+        TextArtifact(
+            producer="test",
+            step=0,
+            content='{"questions":[{"id":"q1","correct":true}]}',
+        ),
+        context,
+    )
 
-    assert context.state.data["StudentProgress"]["q1"]["mastery"] == 1.0
+    assert context.state.data["StudentKnowledgeProgress"].root["q1"].mastery == 1.0
 
 
 def test_test_knowledge_actor_includes_all_authoritative_targets():
     context = Context()
-    _, context = TestKnowledgeAnalyzer().run(TextArtifact(
-        producer="test",
-        step=0,
-        content='{"targets":["one","two","three"],"questions":['
-        '{"id":"q1","correct":true,"targets":["one","not-configured"]}]}'
-    ), context)
+    _, context = TestKnowledgeAnalyzer().run(
+        TextArtifact(producer="test", step=0, content='{"targets":["one","two","three"],"questions":[{"id":"q1","correct":true,"targets":["one","not-configured"]}]}'), context
+    )
 
-    state = context.state.data["StudentProgress"]
-    assert list(state) == ["one", "two", "three"]
-    assert state["one"]["mastery"] == 1.0
-    assert state["two"]["mastery"] == 0.0
-    assert state["three"]["mastery"] == 0.0
+    state = context.state.data["StudentKnowledgeProgress"]
+    assert list(state.root) == ["one", "two", "three"]
+    assert state.root["one"].mastery == 1.0
+    assert state.root["two"].mastery == 0.0
+    assert state.root["three"].mastery == 0.0

@@ -30,9 +30,7 @@ def test_denier_route_returns_non_answer_without_calling_llm():
     context = Context()
     context.create_agent_states(actor.agents)
 
-    result, _ = actor.run_student_turn(
-        TextArtifact(producer="tutor", step=0, content="Why?"), context
-    )
+    result, _ = actor.run_student_turn(TextArtifact(producer="tutor", step=0, content="Why?"), context)
 
     assert [artifact.content for artifact in result.artifacts] == ["I don't know."]
 

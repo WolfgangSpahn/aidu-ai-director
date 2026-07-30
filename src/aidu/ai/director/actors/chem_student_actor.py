@@ -77,21 +77,13 @@ class StudentBeginAgent(BeginAgent):
     def run(self, artifact, context, agents=None):
         if self.denial_probability == 0.5:
             if self._next_balanced_target is None:
-                self.target_agent = (
-                    RandomDenier if self._random_value() < 0.5 else ChemStudent
-                )
-                self._next_balanced_target = (
-                    ChemStudent if self.target_agent is RandomDenier else RandomDenier
-                )
+                self.target_agent = RandomDenier if self._random_value() < 0.5 else ChemStudent
+                self._next_balanced_target = ChemStudent if self.target_agent is RandomDenier else RandomDenier
             else:
                 self.target_agent = self._next_balanced_target
                 self._next_balanced_target = None
         else:
-            self.target_agent = (
-                RandomDenier
-                if self._random_value() < self.denial_probability
-                else ChemStudent
-            )
+            self.target_agent = RandomDenier if self._random_value() < self.denial_probability else ChemStudent
         return super().run(artifact, context, agents)
 
 
@@ -128,9 +120,7 @@ class ChemStudentActor(Actor):
     def student(self) -> ChemStudent:
         return next(agent for agent in self.agents if isinstance(agent, ChemStudent))
 
-    def run_student_turn(
-        self, artifact: Artifact, context: Context
-    ) -> tuple[AgentResult, Context]:
+    def run_student_turn(self, artifact: Artifact, context: Context) -> tuple[AgentResult, Context]:
         """Run the complete actor route used by the headless student engine."""
         existing_artifact_ids = set(context.artifacts)
         # Controller ``max_step`` is an absolute context step, while a virtual
@@ -146,10 +136,6 @@ class ChemStudentActor(Actor):
             max_step=turn_max_step,
         )
         artifacts = [
-            produced
-            for produced in context.artifacts.values()
-            if produced.id not in existing_artifact_ids
-            and produced.id != artifact.id
-            and not isinstance(produced, EndArtifact)
+            produced for produced in context.artifacts.values() if produced.id not in existing_artifact_ids and produced.id != artifact.id and not isinstance(produced, EndArtifact)
         ]
         return AgentResult(artifacts=artifacts, recommendations=[]), context

@@ -30,8 +30,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from aidu.ai.core.context import Messages
 from aidu.ai.director.config import DEFAULT_NAMING, WEB_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class UserInput(BaseModel):
 
 class RunRequest(BaseModel):
     summary: str = ""
-    messages: list[dict[str, Any]] = []
+    messages: Messages = Field(default_factory=Messages)
     actor: str = ""
     role: str = "assistant"
     content: str

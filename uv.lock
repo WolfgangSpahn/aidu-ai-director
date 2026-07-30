@@ -203,12 +203,14 @@ name = "aidu-backend-applets"
 version = "0.1.0"
 source = { editable = "../aidu-backend-applets" }
 dependencies = [
+    { name = "aidu-ai-llm" },
     { name = "pydantic" },
     { name = "sqlmodel" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "aidu-ai-llm", editable = "../aidu-ai-llm" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "sqlmodel", specifier = ">=0.0.8" },
 ]

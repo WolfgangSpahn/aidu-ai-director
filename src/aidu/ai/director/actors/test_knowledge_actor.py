@@ -11,17 +11,16 @@ from aidu.ai.actor.actor import Actor
 from aidu.ai.core.agent_result import AgentResult
 from aidu.ai.core.artifacts import TextArtifact
 from aidu.ai.core.context import Context
+from aidu.ai.core.knowledge_progress import StudentKnowledgeProgress
 from aidu.ai.llm.agent import EndAgent, WorkflowAgent
 
 
 def analyze_test_questions(
     questions: list[dict[str, Any]],
     target_ids: list[str] | None = None,
-) -> dict[str, dict[str, float]]:
+) -> StudentKnowledgeProgress:
     """Aggregate objective question results without controller/thread state."""
-    evidence: dict[str, dict[str, float]] = defaultdict(
-        lambda: {"positive_evidence": 0.0, "negative_evidence": 0.0}
-    )
+    evidence: dict[str, dict[str, float]] = defaultdict(lambda: {"positive_evidence": 0.0, "negative_evidence": 0.0})
     authoritative_ids = [str(value).strip() for value in target_ids or [] if str(value).strip()]
     authoritative = set(authoritative_ids)
     for target_id in authoritative_ids:
@@ -50,7 +49,7 @@ def analyze_test_questions(
             "positive_evidence": positive,
             "negative_evidence": negative,
         }
-    return knowledge_state
+    return StudentKnowledgeProgress.model_validate(knowledge_state)
 
 
 class TestKnowledgeAnalyzer(WorkflowAgent):
@@ -60,21 +59,27 @@ class TestKnowledgeAnalyzer(WorkflowAgent):
     def run(self, artifact, context: Context, agents=None) -> tuple[AgentResult, Context]:
         payload = json.loads(str(artifact.content or "{}"))
         knowledge_state = analyze_test_questions(payload.get("questions", []), payload.get("targets"))
-        context.state.data["StudentProgress"] = knowledge_state
+        context.state.data["StudentKnowledgeProgress"] = knowledge_state
         result = TextArtifact(
             producer=self.id,
             step=context.step,
-            content=json.dumps({"knowledge_state": knowledge_state}),
+            content=json.dumps({"knowledge_state": knowledge_state.model_dump()}),
         )
-        return self.result(artifacts=[result], recommendations=[
-            self.register_recommendation(
-                "test_assessed",
-                target=EndAgent,
-                continuations=[],
-                utility=1.0,
-                rationale="The scored test has been converted into target evidence.",
-            )
-        ]), context
+        return (
+            self.result(
+                artifacts=[result],
+                recommendations=[
+                    self.register_recommendation(
+                        "test_assessed",
+                        target=EndAgent,
+                        continuations=[],
+                        utility=1.0,
+                        rationale="The scored test has been converted into target evidence.",
+                    )
+                ],
+            ),
+            context,
+        )
 
 
 class TestKnowledgeActor(Actor):
@@ -93,6 +98,6 @@ class TestKnowledgeActor(Actor):
         knowledge_state = analyze_test_questions(payload.get("questions", []), payload.get("targets"))
         return {
             "role": TestKnowledgeAnalyzer.__name__,
-            "content": json.dumps({"knowledge_state": knowledge_state}),
-            "backend_progress_state": knowledge_state,
+            "content": json.dumps({"knowledge_state": knowledge_state.model_dump()}),
+            "backend_knowledge_progress_state": knowledge_state.model_dump(),
         }
