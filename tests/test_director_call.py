@@ -95,13 +95,13 @@ def test_director_call_without_session_sends_valid_off_air_context(monkeypatch):
     monkeypatch.setattr("aidu.ai.director.director.requests.post", fake_post)
 
     director = Director()
-    director.actors["test_knowledge_actor"] = {
+    director.actors["off_air_actor"] = {
         "service": True,
         "url": "http://actor.test",
     }
 
     director.call(
-        "test_knowledge_actor",
+        "off_air_actor",
         Message(role="user", content='{"questions": []}'),
     )
 

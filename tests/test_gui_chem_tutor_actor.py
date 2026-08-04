@@ -56,6 +56,23 @@ def test_gui_chem_tutor_uses_separate_tutor_and_assessor_clients():
     assert tutor.client is tutor_client
 
 
+def test_gui_chem_tutor_can_use_google_client_only_for_knowledge_assessment():
+    tutor_client = FakeClient()
+    assessor_client = FakeClient()
+    knowledge_assessor_client = FakeClient()
+
+    actor = GuiChemTutorActor(
+        client=tutor_client,
+        assessor_client=assessor_client,
+        knowledge_assessor_client=knowledge_assessor_client,
+    )
+
+    router = next(agent for agent in actor.agents if isinstance(agent, AssessorRouter))
+    assert router.learning_target_assessor.client is knowledge_assessor_client
+    assert router.student_belief_assessor.client is assessor_client
+    assert router.ai_supervisor.client is assessor_client
+
+
 def test_gui_tutor_function_calls_route_through_assessor_join():
     tutor = GuiChemLlmTutor(FakeClient())
 
@@ -111,6 +128,7 @@ def test_gui_chem_tutor_context_trace_contains_forwarded_dialog_only():
 
     context = actor.build_context_from_request(request)
 
+    assert context.control.data["emit_supervision_state"] is False
     assert context.trace.messages.root == [
         {
             "role": "assistant",

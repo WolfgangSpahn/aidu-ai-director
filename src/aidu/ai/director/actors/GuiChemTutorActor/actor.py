@@ -31,7 +31,11 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 TUTOR_MODEL = os.getenv("AIDU_TUTOR_MODEL", "gemini-3.6-flash")
-ASSESSOR_MODEL = "gpt-5-mini"
+ASSESSOR_MODEL = os.getenv("AIDU_ASSESSOR_MODEL", "gpt-5-mini")
+KNOWLEDGE_ASSESSOR_MODEL = os.getenv(
+    "AIDU_KNOWLEDGE_ASSESSOR_MODEL",
+    "gemini-3.5-flash-lite",
+)
 
 
 def _debug_enabled() -> bool:
@@ -86,6 +90,7 @@ class GuiChemTutorActor(Actor):
         client=None,
         session_context: SessionContext | None = None,
         assessor_client=None,
+        knowledge_assessor_client=None,
         tutor_name: str = "Marie",
     ):
         self.tutor_name = tutor_name
@@ -93,10 +98,19 @@ class GuiChemTutorActor(Actor):
             model=TUTOR_MODEL,
             config={"max_tokens": 1024, "thinking_level": "medium"},
         )
+        explicit_assessor_client = assessor_client
         assessor_client = assessor_client or (client if client is not None else OpenAIClient(model=ASSESSOR_MODEL))
+        knowledge_assessor_client = knowledge_assessor_client or (
+            assessor_client
+            if client is not None or explicit_assessor_client is not None
+            else GoogleClient(
+                model=KNOWLEDGE_ASSESSOR_MODEL,
+                config={"max_tokens": 1024, "thinking_level": "low"},
+            )
+        )
         session_context = session_context or SessionContext(on_air=True)
         assessors = (
-            LearningTargetAssessor(client=assessor_client, target=EndAgent),
+            LearningTargetAssessor(client=knowledge_assessor_client, target=EndAgent),
             StudentBeliefAssessor(client=assessor_client, target=EndAgent),
             AiSupervisor(client=assessor_client, target=EndAgent),
         )
@@ -136,7 +150,21 @@ class GuiChemTutorActor(Actor):
         context = Context()
         self.configure_context_from_request(context, req)
         context.state.data["SessionContext"] = session_context
+        context.state.data["TurnIndex"] = len(forwarded_messages)
+        context.state.data["OutcomeStudentTurnIndex"] = max(0, len(forwarded_messages) - 1)
+        context.state.data["LastTutorTurnIndex"] = next(
+            (
+                index
+                for index in range(len(forwarded_messages.root) - 1, -1, -1)
+                if forwarded_messages.root[index].get("role") == "assistant"
+            ),
+            None,
+        )
         context.state.data["StudentBelief"] = forwarded_messages.latest_belief()
+        context.state.data["SupervisorState"] = forwarded_messages.latest_supervisor()
+        # The newest persisted value is useful as context, but must not be
+        # emitted again if this turn's supervisor side task fails.
+        context.control.data["emit_supervision_state"] = False
         knowledge_progress = forwarded_messages.latest_knowledge_progress()
         context.state.data["StudentKnowledgeProgress"] = (
             knowledge_progress

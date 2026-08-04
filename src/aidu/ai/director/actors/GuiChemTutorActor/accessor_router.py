@@ -9,7 +9,7 @@ from aidu.ai.agents.ai_supervisor import AiSupervisor
 from aidu.ai.agents.learning_target_assessor import LearningTargetAssessor
 from aidu.ai.agents.student_belief_assessor import StudentBeliefAssessor
 from aidu.ai.core.agent_result import AgentResult
-from aidu.ai.core.artifacts import AppletArtifact, Artifact, TextArtifact
+from aidu.ai.core.artifacts import Artifact, TextArtifact
 from aidu.ai.core.config import AskConfig
 from aidu.ai.core.context import Context
 from aidu.ai.llm.agent import Agent, EndAgent, WorkflowAgent
@@ -31,7 +31,6 @@ def _run_assessment(
     prompt_params: dict[str, Any],
     instruction: str,
     max_tokens: int,
-    invalid_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Run one injected assessor directly and decode its structured result."""
     result, _ = agent.run(
@@ -54,10 +53,14 @@ def _run_assessment(
     )
     content = result.content()
     try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        logger.warning("%s returned non-JSON content: %r", agent.id, content)
-        return {**invalid_result, "review": True, "raw": content}
+        decoded = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{agent.id} returned non-JSON assessment content."
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise ValueError(f"{agent.id} assessment must be a JSON object.")
+    return decoded
 
 
 class AssessorRouter(WorkflowAgent):
@@ -78,7 +81,6 @@ class AssessorRouter(WorkflowAgent):
 
     def run(self, artifact: Artifact, context: Context, agents=None) -> tuple[AgentResult, Context]:
         current_turn = artifact.to_text()
-        is_applet_input = isinstance(artifact, AppletArtifact)
         side = get_turn_side_tasks(context)
 
         target_context = context.for_assessor()
@@ -94,12 +96,11 @@ class AssessorRouter(WorkflowAgent):
                 context=target_context,
                 instruction="Assess the current chemistry learning evidence.",
                 max_tokens=512,
-                invalid_result={"e": []},
             ),
             on_result=lambda result, joined: apply_target_assessment(
                 assessment=result,
                 context=joined,
-                evidence_scale=0.1 if is_applet_input else 1.0,
+                current_message=current_turn,
             ),
         )
 
@@ -116,7 +117,6 @@ class AssessorRouter(WorkflowAgent):
                 context=belief_context,
                 instruction="Assess the student's current belief state.",
                 max_tokens=512,
-                invalid_result={"belief": {}},
             ),
             on_result=lambda result, joined: update_context_with_belief_assessment(
                 assessment=result,
@@ -137,11 +137,12 @@ class AssessorRouter(WorkflowAgent):
                 context=supervisor_context,
                 instruction="Assess the preceding AI tutor response.",
                 max_tokens=1024,
-                invalid_result={},
             ),
             on_result=lambda result, joined: update_context_with_supervision_assessment(
                 assessment=result,
                 context=joined,
+                assessed_tutor_turn_index=context.state.data.get("LastTutorTurnIndex"),
+                outcome_student_turn_index=max(0, context.state.data["TurnIndex"] - 1),
             ),
         )
 
