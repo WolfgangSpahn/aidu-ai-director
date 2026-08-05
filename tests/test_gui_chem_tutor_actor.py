@@ -129,7 +129,7 @@ def test_gui_chem_tutor_context_trace_contains_forwarded_dialog_only():
     context = actor.build_context_from_request(request)
 
     assert context.control.data["emit_supervision_state"] is False
-    assert context.trace.messages.root == [
+    assert context.trace.messages.model_dump() == [
         {
             "role": "assistant",
             "content": "Welcome Anonymous to our Chemistry Periodic Table session.",

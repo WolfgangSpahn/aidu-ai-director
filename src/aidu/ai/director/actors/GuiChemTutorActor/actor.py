@@ -151,6 +151,9 @@ class GuiChemTutorActor(Actor):
         self.configure_context_from_request(context, req)
         context.state.data["SessionContext"] = session_context
         context.state.data["TurnIndex"] = len(forwarded_messages)
+        # Keep learner-authored text separate from machine-generated applet
+        # payloads. Assessors may use the latter only to verify the former.
+        context.state.data["CurrentStudentMessage"] = str(req.message.content or "").strip()
         context.state.data["OutcomeStudentTurnIndex"] = max(0, len(forwarded_messages) - 1)
         context.state.data["LastTutorTurnIndex"] = next(
             (

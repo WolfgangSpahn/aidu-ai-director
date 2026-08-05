@@ -327,7 +327,28 @@ class Director:
             timeout=300,
             stream=True,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = response.text.strip()
+            try:
+                validation_errors = response.json().get("detail")
+            except (ValueError, AttributeError):
+                validation_errors = None
+            if isinstance(validation_errors, list):
+                rendered = [
+                    f"{'.'.join(str(part) for part in error.get('loc', []))}: "
+                    f"{error.get('msg', 'invalid value')}"
+                    for error in validation_errors[:8]
+                    if isinstance(error, dict)
+                ]
+                if len(validation_errors) > len(rendered):
+                    rendered.append(f"... and {len(validation_errors) - len(rendered)} more validation errors")
+                detail = "; ".join(rendered) or detail
+            raise RuntimeError(
+                f"Actor '{actor}' rejected /run/stream with HTTP "
+                f"{response.status_code}: {detail or '<empty response>'}"
+            ) from exc
         turn_id = str(uuid4())
         final_response: dict[str, Any] | None = None
         for line in response.iter_lines(chunk_size=1, decode_unicode=True):

@@ -18,6 +18,8 @@ from aidu.ai.director.actors.GuiChemTutorActor.reassessment import (
     _configured_assessors,
     assess_unmatched_final_tutor,
 )
+from aidu.ai.director.actors.GuiChemTutorActor.accessor_router import learner_evidence_text
+from aidu.ai.core.artifacts import AppletArtifact
 from aidu.ai.director.actors.GuiChemTutorActor.accessor_router import AssessorRouter
 
 TARGET = "proton-identity"
@@ -355,13 +357,27 @@ def test_assessor_keeps_tutor_question_when_applet_event_precedes_student_reply(
     assert last_tutor_message(context) == "Tutor: How many protons identify carbon?"
 
 
+def test_assessor_never_uses_applet_telemetry_as_learner_authored_text():
+    context = Context()
+    context.state.data["CurrentStudentMessage"] = "I have added something, but still see '?'."
+    artifact = AppletArtifact(
+        producer="user",
+        step=0,
+        content={"protons": 0, "neutrons": 1},
+    )
+
+    assert learner_evidence_text(artifact, context) == (
+        "I have added something, but still see '?'."
+    )
+
+
 def test_assessor_uses_only_teacher_defined_target_meanings():
     prompt = LearningTargetAssessor.prompt_template
 
     assert "Interpret each ID only through its teacher-defined text." in prompt
     assert "{learning_targets}" in prompt
     assert "{history}" in prompt
-    assert "{last_message}" in prompt
+    assert "{tutor_question}" in prompt
     assert "atomic-number-mass-isotopes" not in prompt
 
 
@@ -382,6 +398,11 @@ def test_assessor_prompt_rejects_applet_observation_as_inferred_understanding():
     assert "must never add knowledge, reasoning, or particle identification" in prompt_flat
     assert "at most weak evidence" in prompt_flat
     assert "Merely observing the result" in prompt_flat
+    assert "Machine-generated status text" in prompt_flat
+    assert "A mismatch must never receive positive evidence" in prompt_flat
+    assert 'A vague claim such as "I added something"' in prompt_flat
+    assert "First identify exactly what TUTOR_QUESTION_OR_INSTRUCTION asked" in prompt_flat
+    assert "do not assess an unrelated fact merely because it appears in the applet state" in prompt_flat
 
 
 def test_assessor_prompt_routes_uncertainty_only_to_directly_tested_target():
@@ -389,7 +410,7 @@ def test_assessor_prompt_routes_uncertainty_only_to_directly_tested_target():
     prompt_flat = " ".join(prompt.split())
 
     assert 'An uncertainty response such as "I don\'t know"' in prompt_flat
-    assert "only for the specific target directly tested by LAST_MESSAGE" in prompt_flat
+    assert "only for the specific target directly tested by TUTOR_QUESTION_OR_INSTRUCTION" in prompt_flat
     assert 'support_level "answer_revealed"' in prompt_flat
 
 
@@ -440,5 +461,5 @@ def test_assessor_prompt_receives_arbitrary_target_text_and_history():
 
     assert "Identify and explain a doubling pattern." in prompt["learning_targets"]
     assert "The second value is twice the first." in prompt["history"]
-    assert prompt["last_message"] == "Tutor: What pattern do you notice?"
+    assert prompt["tutor_question"] == "Tutor: What pattern do you notice?"
     assert prompt["current_message"] == "It doubles each time."

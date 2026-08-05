@@ -8,7 +8,7 @@ from aidu.ai.agents.ai_supervisor import AiSupervisor
 from aidu.ai.agents.learning_target_assessor import LearningTargetAssessor
 from aidu.ai.agents.student_belief_assessor import StudentBeliefAssessor
 from aidu.ai.core.belief import StudentBelief
-from aidu.ai.core.context import Context, Message
+from aidu.ai.core.context import Context, Messages
 from aidu.ai.core.session import SessionContext
 
 from .accessor_router import AssessorRouter, _run_assessment
@@ -60,24 +60,25 @@ def assess_unmatched_final_tutor(
     belief: StudentBelief | None = None,
 ) -> dict[str, Any] | None:
     """Assess a trailing tutor turn without pretending a learner outcome exists."""
-    if not turns or turns[-1].get("role") != "assistant":
+    persisted_turns = Messages.model_validate(turns)
+    if not persisted_turns or persisted_turns[-1].role != "assistant":
         return None
     tutor_index = len(turns) - 1
     _, _, supervisor_agent = _configured_assessors(actor)
     session_context = SessionContext(on_air=True, domain_targets=domain_targets)
     if progress is None:
         progress = session_context.initial_student_knowledge_progress()
-        for turn in reversed(turns):
-            state = turn.get("backend_knowledge_progress_state")
-            if isinstance(state, dict):
-                progress = progress.model_validate(state)
+        for turn in reversed(persisted_turns):
+            state = turn.backend_knowledge_progress_state
+            if state is not None:
+                progress = state
                 break
     if belief is None:
         belief = StudentBelief()
-        for turn in reversed(turns):
-            state = turn.get("backend_belief_state")
-            if isinstance(state, dict):
-                belief = StudentBelief.model_validate(state)
+        for turn in reversed(persisted_turns):
+            state = turn.backend_belief_state
+            if state is not None:
+                belief = state
                 break
     context = Context()
     context.state.data.update({
@@ -88,11 +89,7 @@ def assess_unmatched_final_tutor(
         "StudentBelief": belief,
         "AppletState": {},
     })
-    context.trace.messages = [
-        cleaned
-        for turn in turns
-        if (cleaned := Message.clean_dialog_record(turn)) is not None
-    ]
+    context.trace.messages = persisted_turns.cleaned_dialog(limit=len(persisted_turns))
     assessor_context = context.for_assessor()
     result = _run_assessment(
         agent=supervisor_agent,
@@ -116,13 +113,14 @@ def assess_unmatched_final_tutor(
         "turn_index": tutor_index,
         "assessed_tutor_turn_index": tutor_index,
         "role": "assistant",
-        "actor": turns[-1].get("actor"),
+        "actor": persisted_turns[-1].actor,
         "supervision_state": context.state.data["SupervisorState"].model_dump(mode="json"),
     }
 
 
 def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dict[str, Any]]) -> dict[str, Any]:
     """Return fresh per-student-turn states using the actor's configured assessors."""
+    persisted_turns = Messages.model_validate(turns)
     target_agent, belief_agent, supervisor_agent = _configured_assessors(actor)
     session_context = SessionContext(on_air=True, domain_targets=domain_targets)
     progress = session_context.initial_student_knowledge_progress()
@@ -131,24 +129,22 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
     belief_states: list[dict[str, Any]] = []
     supervision_states: list[dict[str, Any]] = []
 
-    for turn_index, turn in enumerate(turns):
-        if turn.get("role") != "user":
+    for turn_index, turn in enumerate(persisted_turns):
+        if turn.role != "user":
             continue
-        current_message = str(turn.get("content") or "").strip()
+        current_message = str(turn.content or "").strip()
         if not current_message:
             continue
-        prior_turns = [
-            cleaned
-            for item in turns[:turn_index]
-            if (cleaned := Message.clean_dialog_record(item)) is not None
-        ]
+        prior_turns = Messages(root=persisted_turns.root[:turn_index]).cleaned_dialog(
+            limit=turn_index
+        )
         context = Context()
         context.state.data.update({
             "SessionContext": session_context,
             "TurnIndex": turn_index,
             "StudentKnowledgeProgress": progress,
             "StudentBelief": belief,
-            "AppletState": turn.get("applet_input") or {},
+            "AppletState": turn.applet_input or {},
         })
         context.trace.messages = prior_turns
         assessor_context = context.model_copy(deep=True)
@@ -174,7 +170,7 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
         belief = context.state.data["StudentBelief"]
 
         tutor_index = next(
-            (index for index in range(turn_index - 1, -1, -1) if turns[index].get("role") == "assistant"),
+            (index for index in range(turn_index - 1, -1, -1) if persisted_turns[index].role == "assistant"),
             None,
         )
         if tutor_index is not None:
@@ -200,7 +196,7 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
                 "turn_index": turn_index,
                 "assessed_tutor_turn_index": tutor_index,
                 "role": "user",
-                "actor": turn.get("actor"),
+                "actor": turn.actor,
                 "supervision_state": context.state.data["SupervisorState"].model_dump(mode="json"),
             })
 
@@ -208,14 +204,14 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
             "turn_index": turn_index,
             "assessed_student_turn_index": turn_index,
             "role": "user",
-            "actor": turn.get("actor"),
+            "actor": turn.actor,
             "knowledge_state": progress.model_dump(mode="json"),
         })
         belief_states.append({
             "turn_index": turn_index,
             "assessed_student_turn_index": turn_index,
             "role": "user",
-            "actor": turn.get("actor"),
+            "actor": turn.actor,
             "belief_state": belief.model_dump(mode="json"),
         })
 

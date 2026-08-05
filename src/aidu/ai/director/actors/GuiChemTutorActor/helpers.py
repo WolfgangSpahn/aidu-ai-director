@@ -202,8 +202,6 @@ def _latest_applet_info_store_from_request(req: RunRequest) -> dict[str, Any]:
         return applet_info.to_state()
 
     for message in reversed(req.info.messages):
-        if not isinstance(message, dict):
-            continue
         applet_info = AppletInfo.from_message(message)
         if applet_info:
             return applet_info.to_state()

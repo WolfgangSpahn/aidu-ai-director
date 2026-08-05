@@ -1,3 +1,7 @@
+import requests
+import pytest
+from queue import Queue
+
 from aidu.ai.director.director import Director
 from aidu.ai.actor.types import RunRequest
 from aidu.ai.core.context import Message
@@ -18,6 +22,17 @@ class FakeResponse:
                 '{"type":"final","response":{"role":"assistant","content":"ok"}}',
             ]
         )
+
+
+class RejectedResponse:
+    status_code = 422
+    text = '{"detail":[{"loc":["body","info","messages",2,"role"],"msg":"Field required"}]}'
+
+    def raise_for_status(self):
+        raise requests.HTTPError("422 Client Error")
+
+    def json(self):
+        return {"detail": [{"loc": ["body", "info", "messages", 2, "role"], "msg": "Field required"}]}
 
 
 def test_director_call_sends_nested_message_and_info(monkeypatch):
@@ -109,6 +124,27 @@ def test_director_call_without_session_sends_valid_off_air_context(monkeypatch):
     assert captured["request"].info.session_context.on_air is False
 
 
+def test_director_call_reports_actor_validation_detail(monkeypatch):
+    monkeypatch.setattr(
+        "aidu.ai.director.director.requests.post",
+        lambda *args, **kwargs: RejectedResponse(),
+    )
+    director = Director()
+    director.actors["chem_tutor_actor"] = {
+        "service": True,
+        "url": "http://actor.test",
+    }
+
+    with pytest.raises(RuntimeError) as error:
+        director.call(
+            "chem_tutor_actor",
+            Message(role="user", content="Hello"),
+        )
+
+    assert "HTTP 422" in str(error.value)
+    assert "body.info.messages.2.role: Field required" in str(error.value)
+
+
 def test_director_run_preserves_session_id_without_copying_input_metadata(monkeypatch):
     director = Director()
     director.actors["chem_tutor_actor"] = {
@@ -147,6 +183,3 @@ def test_director_run_preserves_session_id_without_copying_input_metadata(monkey
     assert next_message.session_id == "session-1"
     assert not hasattr(next_message, "kind")
     assert not hasattr(next_message, "applet_input")
-
-
-from queue import Queue

@@ -10,6 +10,7 @@ from aidu.ai.agents.learning_target_assessor import LearningTargetAssessor
 from aidu.ai.agents.student_belief_assessor import StudentBeliefAssessor
 from aidu.ai.core.agent_result import AgentResult
 from aidu.ai.core.artifacts import Artifact, TextArtifact
+from aidu.ai.core.artifacts import AppletArtifact
 from aidu.ai.core.config import AskConfig
 from aidu.ai.core.context import Context
 from aidu.ai.llm.agent import Agent, EndAgent, WorkflowAgent
@@ -22,6 +23,14 @@ from .helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def learner_evidence_text(artifact: Artifact, context: Context) -> str:
+    """Return learner-authored text, never serialized applet telemetry."""
+
+    if isinstance(artifact, AppletArtifact):
+        return str(context.state.data.get("CurrentStudentMessage") or "").strip()
+    return artifact.to_text()
 
 
 def _run_assessment(
@@ -80,7 +89,7 @@ class AssessorRouter(WorkflowAgent):
         self.learning_target_assessor, self.student_belief_assessor, self.ai_supervisor = assessors
 
     def run(self, artifact: Artifact, context: Context, agents=None) -> tuple[AgentResult, Context]:
-        current_turn = artifact.to_text()
+        current_turn = learner_evidence_text(artifact, context)
         side = get_turn_side_tasks(context)
 
         target_context = context.for_assessor()
