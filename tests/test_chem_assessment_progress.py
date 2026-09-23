@@ -18,11 +18,72 @@ from aidu.ai.director.actors.GuiChemTutorActor.reassessment import (
     _configured_assessors,
     assess_unmatched_final_tutor,
 )
-from aidu.ai.director.actors.GuiChemTutorActor.accessor_router import learner_evidence_text
+from aidu.ai.director.actors.GuiChemTutorActor.accessor_router import (
+    learner_evidence_text,
+    smoke_test,
+)
 from aidu.ai.core.artifacts import AppletArtifact
 from aidu.ai.director.actors.GuiChemTutorActor.accessor_router import AssessorRouter
 
 TARGET = "proton-identity"
+
+
+def test_smoke_test_runs_all_three_assessors_through_router(monkeypatch):
+    calls = []
+
+    def fake_run_assessment(**kwargs):
+        agent = kwargs["agent"]
+        calls.append(type(agent))
+        if isinstance(agent, LearningTargetAssessor):
+            return {"evidence": [{
+                "target": TARGET,
+                "direction": "positive",
+                "strength": "moderate",
+                "confidence": 0.9,
+                "evidence_type": "explanation",
+                "response_mode": "deliberate",
+                "support_level": "independent",
+                "quote": "atomic number is six",
+            }], "review": False}
+        if isinstance(agent, StudentBeliefAssessor):
+            return {"evidence": [{
+                "speech_act": "express_understanding",
+                "strength": "moderate",
+                "confidence": 0.8,
+                "quote": "Carbon",
+            }], "review": False}
+        return {
+            dimension: {"fit": 0.8, "reason": "Appropriate for this turn."}
+            for dimension in (
+                "factual_fit", "goal_alignment", "knowledge_alignment",
+                "belief_alignment", "scaffolding_fit",
+            )
+        }
+
+    monkeypatch.setattr(
+        AssessorRouter,
+        "_run_assessment",
+        staticmethod(fake_run_assessment),
+    )
+
+    result = smoke_test(
+        tutor_turn="Which element has six protons?",
+        student_turn="Carbon, because its atomic number is six.",
+        learning_targets=[
+            {"id": TARGET, "text": "Identify elements from proton count."}
+        ],
+        client=SimpleNamespace(),
+    )
+
+    assert set(calls) == {LearningTargetAssessor, StudentBeliefAssessor, AiSupervisor}
+    assert result["targets"][0]["id"] == TARGET
+    assert result["assessments"]["knowledge"]["evidence"][0]["target"] == TARGET
+    assert result["assessments"]["belief"]["evidence"][0]["speech_act"] == "express_understanding"
+    assert result["initial_state"]["knowledge"][TARGET]["mastery"] == 0.5
+    assert result["final_state"]["knowledge"][TARGET]["mastery"] > 0.5
+    assert result["initial_state"]["belief"]["confidence"] == 0.5
+    assert result["final_state"]["belief"]["confidence"] > 0.5
+    assert result["final_state"]["supervision"]["factual_fit"]["fit"] == 0.8
 
 
 def test_reassessment_resolves_assessors_from_live_nested_router():
@@ -61,7 +122,7 @@ def test_unmatched_final_tutor_gets_provisional_supervision(monkeypatch):
         return assessment
 
     monkeypatch.setattr(
-        "aidu.ai.director.actors.GuiChemTutorActor.reassessment._run_assessment",
+        "aidu.ai.director.actors.GuiChemTutorActor.accessor_router.AssessorRouter._run_assessment",
         fake_run_assessment,
     )
     actor = SimpleNamespace(agents=[
@@ -84,7 +145,8 @@ def test_unmatched_final_tutor_gets_provisional_supervision(monkeypatch):
     assert snapshot["assessed_tutor_turn_index"] == 1
     assert snapshot["supervision_state"]["outcome_student_turn_index"] is None
     assert snapshot["supervision_state"]["outcome_evidence_available"] is False
-    assert captured["outcome_evidence_available"] == "false"
+    assert "outcome_evidence_available" not in captured
+    assert "current_student_message" not in captured
 
 
 def test_terminal_supervision_is_not_created_when_a_learner_turn_follows():
@@ -100,7 +162,7 @@ def test_terminal_supervision_is_not_created_when_a_learner_turn_follows():
     ) is None
 
 
-def test_belief_assessor_prompt_uses_prior_canonical_belief():
+def test_belief_assessor_prompt_does_not_expose_final_belief_dimensions():
     context = Context()
     context.state.data["StudentBelief"] = StudentBelief(confusion=0.8)
     context.state.data["AppletState"] = {}
@@ -110,7 +172,7 @@ def test_belief_assessor_prompt_uses_prior_canonical_belief():
         current_message="I do not understand what to do next.",
     )
 
-    assert '"confusion":0.8' in params["prior_belief"]
+    assert "prior_belief" not in params
     assert params["current_message"] == "I do not understand what to do next."
 
 
@@ -118,24 +180,67 @@ def test_belief_assessment_updates_context_from_contract():
     context = Context()
     original = StudentBelief()
     context.state.data["StudentBelief"] = original
-    assessed = {field_name: 0.25 for field_name in StudentBelief.model_fields}
-
     update_context_with_belief_assessment(
-        assessment={"belief": assessed, "review": False},
+        assessment={
+            "evidence": [{
+                "speech_act": "express_understanding",
+                "strength": "strong",
+                "confidence": 1.0,
+                "quote": "I am certain",
+            }],
+            "review": False,
+        },
         context=context,
+        current_message="I am certain this is carbon.",
     )
 
     updated = context.state.data["StudentBelief"]
-    for field_name, old_value in original.model_dump().items():
-        assert getattr(updated, field_name) == pytest.approx(
-            max(old_value - 0.15, min(old_value + 0.15, assessed[field_name]))
-        )
-    assert context.control.data["student_belief_assessment"]["belief"] == updated.model_dump()
+    assert updated.confidence == pytest.approx(original.confidence + 0.15)
+    assert updated.confusion == pytest.approx(original.confusion - 0.15)
+    assert context.control.data["student_belief_assessment"]["derived_belief"] == updated.model_dump()
 
     with pytest.raises(ValueError):
         update_context_with_belief_assessment(
-            assessment={"belief": {"confidence": 0.9}},
+            assessment={"evidence": [{"speech_act": "express_understanding"}]},
             context=context,
+        )
+
+
+@pytest.mark.parametrize("include_valid", [False, True])
+def test_unsupported_belief_act_is_stored_for_review_without_aborting(include_valid):
+    context = Context()
+    original = StudentBelief()
+    context.state.data["StudentBelief"] = original
+    unsupported = {"speech_act": "express_surprise", "strength": "strong",
+                   "confidence": 0.9, "quote": "Wow"}
+    evidence = [unsupported]
+    if include_valid:
+        evidence.append({"speech_act": "explain", "strength": "moderate",
+                         "confidence": 1.0, "quote": "because protons define the element"})
+    raw = {"evidence": evidence, "review": False}
+    update_context_with_belief_assessment(
+        raw, context, current_message="Wow, because protons define the element",
+    )
+    stored = context.control.data["student_belief_assessment"]
+    assert stored["review"] is True
+    assert stored["rejected_evidence"] == [{**unsupported, "reason": "Unsupported speech act"}]
+    assert len(stored["evidence"]) == int(include_valid)
+    assert context.state.data["StudentBelief"].self_explanation == pytest.approx(
+        original.self_explanation + (0.1 if include_valid else 0)
+    )
+    assert context.state.data["StudentBelief"].confidence == original.confidence
+    assert raw["review"] is False
+    assert raw["evidence"][0] == unsupported
+
+
+def test_unknown_belief_act_does_not_hide_other_validation_errors():
+    context = Context()
+    context.state.data["StudentBelief"] = StudentBelief()
+    with pytest.raises(ValueError):
+        update_context_with_belief_assessment(
+            {"evidence": [{"speech_act": "express_surprise", "strength": "strong",
+                           "confidence": 2.0, "quote": "Wow"}], "review": False},
+            context, current_message="Wow",
         )
 
 
@@ -172,10 +277,9 @@ def test_supervisor_prompt_uses_applet_state_before_generated_reply():
 
     params = AiSupervisor.build_prompt_args(
         context=context,
-        current_student_message="I think it is carbon.",
     )
 
-    assert params["current_student_message"] == "I think it is carbon."
+    assert "I think it is carbon." not in params["history"]
     assert params["last_tutor_message"] == "Tutor: Which element has six protons?"
     assert '"confusion":0.7' in params["student_belief"]
     assert TARGET in params["teacher_targets"]
@@ -246,6 +350,7 @@ def assess(
                     "strength": strength,
                     "confidence": 1.0,
                     "evidence_type": "explanation",
+                    "response_mode": "deliberate",
                     "support_level": support_level,
                     "quote": quote,
                 }
@@ -463,3 +568,42 @@ def test_assessor_prompt_receives_arbitrary_target_text_and_history():
     assert "The second value is twice the first." in prompt["history"]
     assert prompt["tutor_question"] == "Tutor: What pattern do you notice?"
     assert prompt["current_message"] == "It doubles each time."
+
+
+def test_assessment_logs_turn_numbers_and_raw_invalid_result(caplog):
+    import logging
+
+    context = Context()
+    context.state.data.update({"LastTutorTurnIndex": 14, "OutcomeStudentTurnIndex": 15})
+    agent = SimpleNamespace(id="supervisor", run=lambda **kwargs: (
+        SimpleNamespace(content=lambda: "invalid raw result"), context,
+    ))
+    with caplog.at_level(logging.INFO), pytest.raises(ValueError, match="non-JSON"):
+        AssessorRouter._run_assessment(agent=agent, context=context, prompt_params={},
+                                      instruction="Assess tutor", max_tokens=1024)
+    label = context.control.data["assessment_log_label"]
+    assert "tutor_turn=#15 learner_turn=#16" in label
+    assert f"Assessment started {label}" in caplog.text
+    assert f"Assessment raw result {label}\ninvalid raw result" in caplog.text
+
+
+def test_reassessment_preserves_test_prior_and_default_entry_belief(monkeypatch):
+    from aidu.ai.director.actors.GuiChemTutorActor import reassessment
+    from aidu.ai.core.supervisor import SUPERVISOR_DIMENSIONS
+
+    agent = SimpleNamespace(build_prompt_args=lambda **kwargs: {})
+    monkeypatch.setattr(reassessment, "_configured_assessors", lambda actor: (agent, agent, agent))
+    def assess(**kwargs):
+        if "tutor response" in kwargs["instruction"]:
+            return {key: {"fit": 0.5, "reason": "Test"} for key in SUPERVISOR_DIMENSIONS}
+        return {"evidence": [], "review": False}
+    monkeypatch.setattr(AssessorRouter, "_run_assessment", staticmethod(assess))
+    result = reassessment.reassess_dialog(None, [
+        {"role": "assistant", "content": "Welcome", "backend_knowledge_state_kind": "prior",
+         "backend_knowledge_progress_state": {TARGET: {"mastery": 0.8, "entry_prior": 0.8, "positive_evidence": 0, "negative_evidence": 0, "entry_weight": 1, "source_count": 0, "turn_assessment_count": 0, "last_updated_turn": None, "evidence_fingerprints": []}}},
+        {"role": "user", "content": "Hello"},
+    ], [{"id": TARGET, "text": "Identify protons"}])
+    assert result["knowledge_states"][0]["state_kind"] == "prior"
+    assert result["knowledge_states"][0]["knowledge_state"][TARGET]["mastery"] == 0.8
+    assert result["knowledge_states"][1]["knowledge_state"][TARGET]["mastery"] == 0.8
+    assert result["belief_states"][0]["belief_state"] == StudentBelief().model_dump()

@@ -5,16 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from aidu.ai.agents.ai_supervisor import AiSupervisor
+from aidu.ai.agents.ai_label_intervention import AiLabelIntervention
 from aidu.ai.agents.learning_target_assessor import LearningTargetAssessor
 from aidu.ai.agents.student_belief_assessor import StudentBeliefAssessor
 from aidu.ai.core.belief import StudentBelief
 from aidu.ai.core.context import Context, Messages
 from aidu.ai.core.session import SessionContext
 
-from .accessor_router import AssessorRouter, _run_assessment
+from .accessor_router import AssessorRouter
 from .helpers import (
     apply_target_assessment,
     update_context_with_belief_assessment,
+    update_context_with_intervention_label,
     update_context_with_supervision_assessment,
 )
 
@@ -51,6 +53,22 @@ def _configured_assessors(actor):
     return target, belief, supervisor
 
 
+def _configured_intervention_labeler(actor):
+    """Return the optional intervention labeler from a nested or flat actor."""
+    if actor is None:
+        return None
+    router = next(
+        (agent for agent in actor.agents if isinstance(agent, AssessorRouter)),
+        None,
+    )
+    if router is not None:
+        return router.ai_label_intervention
+    return next(
+        (agent for agent in actor.agents if isinstance(agent, AiLabelIntervention)),
+        None,
+    )
+
+
 def assess_unmatched_final_tutor(
     actor,
     turns: list[dict[str, Any]],
@@ -65,6 +83,7 @@ def assess_unmatched_final_tutor(
         return None
     tutor_index = len(turns) - 1
     _, _, supervisor_agent = _configured_assessors(actor)
+    label_agent = _configured_intervention_labeler(actor)
     session_context = SessionContext(on_air=True, domain_targets=domain_targets)
     if progress is None:
         progress = session_context.initial_student_knowledge_progress()
@@ -85,21 +104,22 @@ def assess_unmatched_final_tutor(
         "SessionContext": session_context,
         "TurnIndex": tutor_index,
         "LastTutorTurnIndex": tutor_index,
+        "IsInitialTutorTurn": tutor_index == next(
+            (index for index, turn in enumerate(persisted_turns) if turn.role == "assistant"), None,
+        ),
         "StudentKnowledgeProgress": progress,
         "StudentBelief": belief,
         "AppletState": {},
     })
     context.trace.messages = persisted_turns.cleaned_dialog(limit=len(persisted_turns))
     assessor_context = context.for_assessor()
-    result = _run_assessment(
+    result = AssessorRouter._run_assessment(
         agent=supervisor_agent,
         context=assessor_context,
         prompt_params=supervisor_agent.build_prompt_args(
             context=assessor_context,
-            current_student_message="No subsequent learner turn is available.",
-            outcome_evidence_available=False,
         ),
-        instruction="Assess the unmatched final AI tutor response without learner outcome evidence.",
+        instruction="Assess the unmatched final AI tutor response using only context available at that turn.",
         max_tokens=1024,
     )
     update_context_with_supervision_assessment(
@@ -109,6 +129,18 @@ def assess_unmatched_final_tutor(
         outcome_student_turn_index=None,
         outcome_evidence_available=False,
     )
+    if label_agent is not None:
+        label_result = AssessorRouter._run_assessment(
+            agent=label_agent,
+            context=assessor_context.model_copy(deep=True),
+            prompt_params=label_agent.build_prompt_args(
+                context=assessor_context,
+                current_student_message="No subsequent learner turn is available.",
+            ),
+            instruction="Label the intervention in the unmatched final AI tutor response.",
+            max_tokens=256,
+        )
+        update_context_with_intervention_label(label_result, context)
     return {
         "turn_index": tutor_index,
         "assessed_tutor_turn_index": tutor_index,
@@ -122,11 +154,29 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
     """Return fresh per-student-turn states using the actor's configured assessors."""
     persisted_turns = Messages.model_validate(turns)
     target_agent, belief_agent, supervisor_agent = _configured_assessors(actor)
+    label_agent = _configured_intervention_labeler(actor)
     session_context = SessionContext(on_air=True, domain_targets=domain_targets)
     progress = session_context.initial_student_knowledge_progress()
     belief = StudentBelief()
-    knowledge_states: list[dict[str, Any]] = []
-    belief_states: list[dict[str, Any]] = []
+    # Opening snapshots carry the test-derived knowledge and entry belief.
+    opening_turns = []
+    for turn in persisted_turns:
+        if turn.role == "user":
+            break
+        opening_turns.append(turn)
+    for turn in opening_turns:
+        if turn.backend_knowledge_progress_state is not None:
+            progress = turn.backend_knowledge_progress_state.model_copy(deep=True)
+        if turn.backend_belief_state is not None:
+            belief = turn.backend_belief_state.model_copy(deep=True)
+    knowledge_states: list[dict[str, Any]] = [{
+        "turn_index": -1, "assessed_student_turn_index": None,
+        "state_kind": "prior", "knowledge_state": progress.model_dump(mode="json"),
+    }]
+    belief_states: list[dict[str, Any]] = [{
+        "turn_index": -1, "assessed_student_turn_index": None,
+        "state_kind": "prior", "belief_state": belief.model_dump(mode="json"),
+    }]
     supervision_states: list[dict[str, Any]] = []
 
     for turn_index, turn in enumerate(persisted_turns):
@@ -149,7 +199,7 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
         context.trace.messages = prior_turns
         assessor_context = context.model_copy(deep=True)
 
-        target_result = _run_assessment(
+        target_result = AssessorRouter._run_assessment(
             agent=target_agent,
             context=assessor_context.model_copy(deep=True),
             prompt_params=target_agent.build_prompt_args(context=assessor_context, current_message=current_message),
@@ -159,14 +209,18 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
         apply_target_assessment(target_result, context, current_message=current_message)
         progress = context.state.data["StudentKnowledgeProgress"]
 
-        belief_result = _run_assessment(
+        belief_result = AssessorRouter._run_assessment(
             agent=belief_agent,
             context=assessor_context.model_copy(deep=True),
             prompt_params=belief_agent.build_prompt_args(context=assessor_context, current_message=current_message),
-            instruction="Reassess the archived learner message's belief state.",
+            instruction="Classify observable speech acts in the archived learner message.",
             max_tokens=512,
         )
-        update_context_with_belief_assessment(belief_result, context)
+        update_context_with_belief_assessment(
+            belief_result,
+            context,
+            current_message=current_message,
+        )
         belief = context.state.data["StudentBelief"]
 
         tutor_index = next(
@@ -174,14 +228,16 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
             None,
         )
         if tutor_index is not None:
+            assessor_context.state.data["IsInitialTutorTurn"] = tutor_index == next(
+                (index for index, candidate in enumerate(persisted_turns) if candidate.role == "assistant"), None,
+            )
             assessor_context.state.data["LastTutorTurnIndex"] = tutor_index
             assessor_context.state.data["OutcomeStudentTurnIndex"] = turn_index
-            supervisor_result = _run_assessment(
+            supervisor_result = AssessorRouter._run_assessment(
                 agent=supervisor_agent,
                 context=assessor_context.model_copy(deep=True),
                 prompt_params=supervisor_agent.build_prompt_args(
                     context=assessor_context,
-                    current_student_message=current_message,
                 ),
                 instruction="Reassess the archived preceding AI tutor response.",
                 max_tokens=1024,
@@ -192,6 +248,18 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
                 assessed_tutor_turn_index=tutor_index,
                 outcome_student_turn_index=turn_index,
             )
+            if label_agent is not None:
+                label_result = AssessorRouter._run_assessment(
+                    agent=label_agent,
+                    context=assessor_context.model_copy(deep=True),
+                    prompt_params=label_agent.build_prompt_args(
+                        context=assessor_context,
+                        current_student_message=current_message,
+                    ),
+                    instruction="Label the intervention in the archived preceding AI tutor response.",
+                    max_tokens=256,
+                )
+                update_context_with_intervention_label(label_result, context)
             supervision_states.append({
                 "turn_index": turn_index,
                 "assessed_tutor_turn_index": tutor_index,
@@ -206,6 +274,7 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
             "role": "user",
             "actor": turn.actor,
             "knowledge_state": progress.model_dump(mode="json"),
+            "assessment_evidence": context.control.data.get("learning_target_applied_evidence"),
         })
         belief_states.append({
             "turn_index": turn_index,
@@ -213,6 +282,7 @@ def reassess_dialog(actor, turns: list[dict[str, Any]], domain_targets: list[dic
             "role": "user",
             "actor": turn.actor,
             "belief_state": belief.model_dump(mode="json"),
+            "assessment_evidence": context.control.data.get("student_belief_assessment"),
         })
 
     terminal_supervision = assess_unmatched_final_tutor(

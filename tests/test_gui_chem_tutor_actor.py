@@ -3,17 +3,53 @@ from aidu.ai.actor.turn_scope import JoinEndAgent
 from aidu.ai.agents.chem_applet_tutor import AppletRuleResponder
 from aidu.ai.core.artifacts import AppletArtifact
 from aidu.ai.core.context import Context
+from aidu.ai.core.knowledge_progress import EvidenceKnowledgeProgress, StudentKnowledgeProgress
+from aidu.ai.core.session import SessionContext
 from aidu.ai.director.actors.GuiChemTutorActor import (
     AssessorRouter,
     GuiChemLlmTutor,
     GuiChemTutorActor,
     GuiInputRouter,
 )
+from aidu.ai.director.actors.GuiChemTutorActor import actor as actor_module
 from fastapi.testclient import TestClient
 
 
 class FakeClient:
     pass
+
+
+def test_gui_tutor_prompt_uses_progress_band_and_localized_status():
+    session = SessionContext(
+        on_air=False,
+        applet={
+            "initial_instruction": "add a proton and observe the display.",
+            "progress_status_template": "Im Moment stehst Du bei {progress}%.",
+            "progress_tasks": {
+                "0-25": "task one",
+                "25-50": "task two",
+                "50-75": "task three",
+                "75-100": "task four",
+            },
+        },
+    )
+    progress = StudentKnowledgeProgress(root={
+        "target-a": EvidenceKnowledgeProgress(
+            mastery=0.9, positive_evidence=0.0, negative_evidence=0.0,
+            entry_prior=0.9, entry_weight=0.75, source_count=0,
+            turn_assessment_count=0, last_updated_turn=None,
+        ),
+    })
+
+    args = GuiChemLlmTutor.build_prompt_args(
+        tutor_name="Marie",
+        session_context=session,
+        student_knowledge_progress=progress,
+    )
+
+    assert args["current_progress_status"] == "Im Moment stehst Du bei 90%."
+    assert args["applet_initial_instruction"] == "add a proton and observe the display."
+    assert args["selected_applet_task"] == "task four"
 
 
 def test_applet_input_routes_to_tutor_without_symbolic_responder():
@@ -56,6 +92,28 @@ def test_gui_chem_tutor_uses_separate_tutor_and_assessor_clients():
     assert tutor.client is tutor_client
 
 
+def test_default_assessor_clients_use_gemini_flash_lite(monkeypatch):
+    class RecordingGoogleClient:
+        def __init__(self, *, model, config=None):
+            self.model = model
+
+    monkeypatch.setattr(actor_module, "GoogleClient", RecordingGoogleClient)
+    monkeypatch.setattr(actor_module, "ASSESSOR_MODEL", "gemini-3.5-flash-lite")
+    monkeypatch.setattr(actor_module, "KNOWLEDGE_ASSESSOR_MODEL", "gemini-3.5-flash-lite")
+    monkeypatch.setattr(actor_module, "INTERVENTION_LABEL_MODEL", "gemini-3.5-flash-lite")
+
+    actor = GuiChemTutorActor()
+    router = next(agent for agent in actor.agents if isinstance(agent, AssessorRouter))
+    assessors = (
+        router.learning_target_assessor,
+        router.student_belief_assessor,
+        router.ai_supervisor,
+        router.ai_label_intervention,
+    )
+
+    assert {assessor.client.model for assessor in assessors} == {"gemini-3.5-flash-lite"}
+
+
 def test_gui_chem_tutor_can_use_google_client_only_for_knowledge_assessment():
     tutor_client = FakeClient()
     assessor_client = FakeClient()
@@ -71,6 +129,22 @@ def test_gui_chem_tutor_can_use_google_client_only_for_knowledge_assessment():
     assert router.learning_target_assessor.client is knowledge_assessor_client
     assert router.student_belief_assessor.client is assessor_client
     assert router.ai_supervisor.client is assessor_client
+
+
+def test_gui_chem_tutor_can_use_a_separate_intervention_label_client():
+    tutor_client = FakeClient()
+    assessor_client = FakeClient()
+    intervention_label_client = FakeClient()
+
+    actor = GuiChemTutorActor(
+        client=tutor_client,
+        assessor_client=assessor_client,
+        intervention_label_client=intervention_label_client,
+    )
+
+    router = next(agent for agent in actor.agents if isinstance(agent, AssessorRouter))
+    assert router.ai_supervisor.client is assessor_client
+    assert router.ai_label_intervention.client is intervention_label_client
 
 
 def test_gui_tutor_function_calls_route_through_assessor_join():
@@ -364,3 +438,18 @@ def test_gui_chem_tutor_applet_input_returns_visible_dialog_response():
     assert response.json()["content"] == "You have clicked this. What was your intent"
     assert "applet" not in response.json()
     assert "applet_command" not in response.json()
+
+
+def test_supervisor_opening_flag_uses_full_dialog_before_history_is_truncated():
+    actor = GuiChemTutorActor(client=FakeClient())
+    for tutor_indices, expected in [([2], True), ([0, 12], False)]:
+        messages = [
+            {"role": "assistant" if index in tutor_indices else "user", "content": f"turn {index}"}
+            for index in range(14)
+        ]
+        request = RunRequest(
+            message=messages[-1],
+            info={"session_context": {"on_air": False}, "messages": messages},
+        )
+        context = actor.build_context_from_request(request)
+        assert context.state.data["IsInitialTutorTurn"] is expected

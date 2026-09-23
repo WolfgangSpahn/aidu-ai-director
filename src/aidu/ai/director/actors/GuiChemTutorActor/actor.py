@@ -8,6 +8,7 @@ from aidu.ai.actor.actor import Actor
 from aidu.ai.actor.turn_scope import JoinEndAgent
 from aidu.ai.actor.types import RunRequest
 from aidu.ai.agents.ai_supervisor import AiSupervisor
+from aidu.ai.agents.ai_label_intervention import AiLabelIntervention
 from aidu.ai.agents.chem_applet_tutor import (
     ChemLlmTutor,
     build_chem_applet_prompt_args,
@@ -20,7 +21,6 @@ from aidu.ai.core.context import Context
 from aidu.ai.core.session import SessionContext
 from aidu.ai.llm.agent import BeginAgent, DebugAgent, EndAgent
 from aidu.ai.llm.clients.google import GoogleClient
-from aidu.ai.llm.clients.openai import OpenAIClient
 
 from .accessor_router import AssessorRouter
 from .gui_input_router import GuiInputRouter
@@ -31,9 +31,13 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 TUTOR_MODEL = os.getenv("AIDU_TUTOR_MODEL", "gemini-3.6-flash")
-ASSESSOR_MODEL = os.getenv("AIDU_ASSESSOR_MODEL", "gpt-5-mini")
+ASSESSOR_MODEL = os.getenv("AIDU_ASSESSOR_MODEL", "gemini-3.5-flash-lite")
 KNOWLEDGE_ASSESSOR_MODEL = os.getenv(
     "AIDU_KNOWLEDGE_ASSESSOR_MODEL",
+    "gemini-3.5-flash-lite",
+)
+INTERVENTION_LABEL_MODEL = os.getenv(
+    "AIDU_INTERVENTION_LABEL_MODEL",
     "gemini-3.5-flash-lite",
 )
 
@@ -67,12 +71,14 @@ class GuiChemLlmTutor(ChemLlmTutor):
             or session_context.initial_student_knowledge_progress()
         )
         belief = student_belief or StudentBelief()
+        progress_percent = knowledge_progress.mean_mastery_percent()
         return build_chem_applet_prompt_args(
             tutor_name=tutor_name,
             level="beginner",
             history=history,
             student_knowledge_progress=knowledge_progress.to_tutor_text(),
             student_belief=" - " + belief.to_tutor_text(),
+            current_progress_percent=progress_percent,
             domain=session_context.domain_prompt_metadata(),
             applet=session_context.applet_prompt_metadata(),
             applet_state=applet_state,
@@ -91,6 +97,7 @@ class GuiChemTutorActor(Actor):
         session_context: SessionContext | None = None,
         assessor_client=None,
         knowledge_assessor_client=None,
+        intervention_label_client=None,
         tutor_name: str = "Marie",
     ):
         self.tutor_name = tutor_name
@@ -99,7 +106,14 @@ class GuiChemTutorActor(Actor):
             config={"max_tokens": 1024, "thinking_level": "medium"},
         )
         explicit_assessor_client = assessor_client
-        assessor_client = assessor_client or (client if client is not None else OpenAIClient(model=ASSESSOR_MODEL))
+        assessor_client = assessor_client or (
+            client
+            if client is not None
+            else GoogleClient(
+                model=ASSESSOR_MODEL,
+                config={"max_tokens": 1024, "thinking_level": "low"},
+            )
+        )
         knowledge_assessor_client = knowledge_assessor_client or (
             assessor_client
             if client is not None or explicit_assessor_client is not None
@@ -108,11 +122,20 @@ class GuiChemTutorActor(Actor):
                 config={"max_tokens": 1024, "thinking_level": "low"},
             )
         )
+        intervention_label_client = intervention_label_client or (
+            assessor_client
+            if client is not None or explicit_assessor_client is not None
+            else GoogleClient(
+                model=INTERVENTION_LABEL_MODEL,
+                config={"max_tokens": 256, "thinking_level": "low"},
+            )
+        )
         session_context = session_context or SessionContext(on_air=True)
         assessors = (
             LearningTargetAssessor(client=knowledge_assessor_client, target=EndAgent),
             StudentBeliefAssessor(client=assessor_client, target=EndAgent),
             AiSupervisor(client=assessor_client, target=EndAgent),
+            AiLabelIntervention(client=intervention_label_client, target=EndAgent),
         )
         agents = [
             BeginAgent(target=AssessorRouter, interactive=_debug_enabled()),
@@ -164,6 +187,12 @@ class GuiChemTutorActor(Actor):
             None,
         )
         context.state.data["StudentBelief"] = forwarded_messages.latest_belief()
+        context.state.data["IsInitialTutorTurn"] = (
+            context.state.data["LastTutorTurnIndex"] == next(
+                (index for index, turn in enumerate(forwarded_messages.root) if turn.get("role") == "assistant"),
+                None,
+            )
+        ) if context.state.data["LastTutorTurnIndex"] is not None else None
         context.state.data["SupervisorState"] = forwarded_messages.latest_supervisor()
         # The newest persisted value is useful as context, but must not be
         # emitted again if this turn's supervisor side task fails.

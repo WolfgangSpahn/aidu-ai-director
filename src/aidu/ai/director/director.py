@@ -461,6 +461,8 @@ class Director:
                     info.session_id if info else None,
                     response["activity_event"],
                 )
+            if response.get("backend_assessment_evidence") is not None:
+                next_message.backend_assessment_evidence = response["backend_assessment_evidence"]
             if response.get("backend_belief_state"):
                 next_message.backend_belief_state = response["backend_belief_state"]
             if response.get("backend_knowledge_progress_state"):
