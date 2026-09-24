@@ -156,7 +156,7 @@ class AssessorRouter(WorkflowAgent):
             ),
         )
 
-        logger.info("Assessment raw result %s\n%s", assessment_label, result.content())
+        logger.debug("Assessment raw result %s\n%s", assessment_label, result.content())
 
         # Decode at this boundary so callbacks never receive model text.
         try:
