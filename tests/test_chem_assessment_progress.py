@@ -578,13 +578,59 @@ def test_assessment_logs_turn_numbers_and_raw_invalid_result(caplog):
     agent = SimpleNamespace(id="supervisor", run=lambda **kwargs: (
         SimpleNamespace(content=lambda: "invalid raw result"), context,
     ))
-    with caplog.at_level(logging.INFO), pytest.raises(ValueError, match="non-JSON"):
+    with caplog.at_level(logging.DEBUG), pytest.raises(ValueError, match="non-JSON"):
         AssessorRouter._run_assessment(agent=agent, context=context, prompt_params={},
                                       instruction="Assess tutor", max_tokens=1024)
     label = context.control.data["assessment_log_label"]
     assert "tutor_turn=#15 learner_turn=#16" in label
     assert f"Assessment started {label}" in caplog.text
     assert f"Assessment raw result {label}\ninvalid raw result" in caplog.text
+
+
+@pytest.mark.parametrize("content", [
+    '{"intervention":"PROBE","reason":"Asked for an observation."}',
+    'Here is the assessment:\n```json\n{"intervention":"PROBE","reason":"Asked for an observation."}\n```',
+])
+def test_assessment_decodes_json_object_with_surrounding_text(content):
+    context = Context()
+    agent = SimpleNamespace(id="ai_label_intervention", run=lambda **kwargs: (
+        SimpleNamespace(content=lambda: content), context,
+    ))
+
+    result = AssessorRouter._run_assessment(
+        agent=agent,
+        context=context,
+        prompt_params={},
+        instruction="Label tutor intervention",
+        max_tokens=256,
+    )
+
+    assert result == {
+        "intervention": "PROBE",
+        "reason": "Asked for an observation.",
+    }
+
+
+def test_truncated_intervention_response_keeps_unambiguous_label(caplog):
+    import logging
+
+    context = Context()
+    agent = SimpleNamespace(id="AiLabelIntervention", run=lambda **kwargs: (
+        SimpleNamespace(content=lambda: '{"intervention": "ELICIT_'), context,
+    ))
+
+    with caplog.at_level(logging.WARNING):
+        result = AssessorRouter._run_assessment(
+            agent=agent,
+            context=context,
+            prompt_params={},
+            instruction="Label tutor intervention",
+            max_tokens=1024,
+        )
+
+    assert result["intervention"] == "ELICIT_EXPLANATION"
+    assert "truncated" in result["reason"]
+    assert "Recovered truncated intervention label" in caplog.text
 
 
 def test_reassessment_preserves_test_prior_and_default_entry_belief(monkeypatch):

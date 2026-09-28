@@ -23,6 +23,7 @@ classes and in ``GuiChemTutorActor.helpers`` respectively.
 import json
 import logging
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 from uuid import uuid4
@@ -34,6 +35,7 @@ from rich.logging import RichHandler
 from aidu.ai.actor.turn_scope import get_turn_side_tasks
 from aidu.ai.agents.ai_supervisor import AiSupervisor
 from aidu.ai.agents.ai_label_intervention import AiLabelIntervention
+from aidu.ai.agents.ai_label_intervention import INTERVENTION_LABELS
 from aidu.ai.agents.learning_target_assessor import LearningTargetAssessor
 from aidu.ai.agents.student_belief_assessor import StudentBeliefAssessor
 from aidu.ai.core.belief import StudentBelief
@@ -56,6 +58,33 @@ from .helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_assessment_object(content: str) -> dict[str, Any]:
+    """Decode a JSON object, tolerating prose or markdown around the object."""
+    try:
+        decoded = json.loads(content)
+    except json.JSONDecodeError:
+        decoded = None
+
+    if isinstance(decoded, dict):
+        return decoded
+
+    # Some model responses wrap otherwise valid JSON in a sentence or a
+    # markdown fence despite JSON mode. Scan from each opening brace and use
+    # the JSON decoder so nested objects and quoted braces remain safe.
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(content):
+        if char != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            return candidate
+
+    raise json.JSONDecodeError("No JSON object found", content, 0)
 
 
 def learner_evidence_text(artifact: Artifact, context: Context) -> str:
@@ -159,17 +188,42 @@ class AssessorRouter(WorkflowAgent):
         logger.debug("Assessment raw result %s\n%s", assessment_label, result.content())
 
         # Decode at this boundary so callbacks never receive model text.
+        raw_content = result.content()
         try:
-            decoded = json.loads(result.content())
+            decoded = _decode_assessment_object(raw_content)
         except json.JSONDecodeError as exc:
+            # Preserve a clearly identifiable intervention when a provider
+            # truncates the response after starting its JSON object. The label
+            # must uniquely match one of the allowed values; never guess from
+            # an ambiguous prefix.
+            if agent.id in {"AiLabelIntervention", "ai_label_intervention"}:
+                match = re.search(
+                    r'["\']intervention["\']\s*:\s*["\']([A-Z_]+)',
+                    raw_content,
+                )
+                prefix = match.group(1) if match else ""
+                candidates = [
+                    label for label in INTERVENTION_LABELS
+                    if label.startswith(prefix)
+                ]
+                if prefix and len(candidates) == 1:
+                    logger.warning(
+                        "Recovered truncated intervention label %s from %s; "
+                        "model rationale was incomplete.",
+                        candidates[0],
+                        raw_content[:200],
+                    )
+                    return {
+                        "intervention": candidates[0],
+                        "reason": "The model response was truncated before its rationale was complete.",
+                    }
             raise ValueError(
-                f"{agent.id} returned non-JSON assessment content."
+                f"{agent.id} returned non-JSON assessment content: "
+                f"{raw_content[:500]!r}"
             ) from exc
 
         # Specific assessment models validate fields later; this shared method
         # guarantees the common top-level object shape.
-        if not isinstance(decoded, dict):
-            raise ValueError(f"{agent.id} assessment must be a JSON object.")
         return decoded
 
     def __init__(
@@ -317,7 +371,7 @@ class AssessorRouter(WorkflowAgent):
                     prompt_params=label_params,
                     context=label_context,
                     instruction="Label the intervention in the preceding AI tutor response.",
-                    max_tokens=256,
+                    max_tokens=1024,
                 ),
                 on_result=lambda result, joined: update_context_with_intervention_label(
                     assessment=result,
